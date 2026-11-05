@@ -1,0 +1,62 @@
+# Builds the installer on Windows and publishes it with the user manual as a GitHub release
+# Start: Actions, Release, Run workflow. A pushed tag like v2.1.0 starts it as well
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Read the version and the release notes
+        id: version
+        shell: bash
+        run: |
+          tag=""
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tag="$GITHUB_REF_NAME"; fi
+          version=$(python .github/release_notes.py release_notes.md "$tag")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if the release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "Release v$VERSION exists already, increase APP_VERSION first"
+            exit 1
+          fi
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the program and the installer
+        shell: cmd
+        run: call build.bat < NUL
+
+      - name: Check the installer
+        shell: bash
+        run: test -f installer/ProjectDesk_Setup.exe
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "v$VERSION" installer/ProjectDesk_Setup.exe docs/ProjectDesk_User_Manual.pdf --title "ProjectDesk $VERSION" --notes-file release_notes.md --target "$GITHUB_SHA"

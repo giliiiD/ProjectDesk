@@ -101,7 +101,7 @@ except ImportError:
 
 # Constants
 APP_NAME = "ProjectDesk"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 APP_USER_MODEL_ID = "ProjectDesk.App"
 SETTINGS_ORGANIZATION = "ToDo"
 SETTINGS_APPLICATION = "ToDo"

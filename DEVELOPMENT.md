@@ -70,25 +70,31 @@ ProjectDesk is a Windows application for project based work, visually based on M
 | `docs/manual/make_screenshots.py` | Screenshots with neutral example data for the manual and the README |
 | `docs/manual/build_manual.py` | Text of the user manual and the PDF build |
 | `.gitignore` | Keeps build output and personal data out of the repository |
+| `.github/workflows/release.yml` | GitHub workflow Release: builds the installer on Windows and publishes the release |
+| `.github/release_notes.py` | Reads the version and the release notes for the workflow |
 
-Build output (`installer\`, `build\`, `dist\`, `*.spec`, `__pycache__\`, `docs\manual\build\`) is never committed. The installer is published as a GitHub release instead. `.gitignore` also keeps personal data (`data.json`, `data_v1_backup.json`, `attachments\`, `images\`, `backups\`) out of the repository, in case the storage folder is the project folder.
+Build output (`installer\`, `build\`, `dist\`, `*.spec`, `__pycache__\`, `docs\manual\build\`) is never committed. The installer is published as a GitHub release instead, built by the workflow Release. `.gitignore` also keeps personal data (`data.json`, `data_v1_backup.json`, `attachments\`, `images\`, `backups\`) out of the repository, in case the storage folder is the project folder.
 
 Screenshots in the repository and in the manual only show neutral example content, never real projects.
 
 ## Building and Distributing a New Version
 
 1. Increase the constant `APP_VERSION` in `project_desk.py`. `build.bat` reads it and passes it to the installer. Also update the version line at the end of `README.md`.
-2. Add an entry to the version history at the end of this file. If the visible behavior changed, also update the user manual (see "User Manual").
-3. Run `build.bat`. Requirements on the build machine:
-   - Python 3 (tested with 3.13), with "Add to PATH" enabled during setup
-   - Inno Setup 6 or 7, "Install for me only" is sufficient
-4. Result: `installer\ProjectDesk_Setup.exe`. Only this file is shared with colleagues. They do not need Python.
-5. Upload the changed files to GitHub and create a release (see "GitHub in the Browser").
-6. Colleagues download the installer from the latest release and install it over the old version, their data is kept.
+2. Add a section `### <version>` to the version history at the end of this file. Its lines become the description of the release. If the visible behavior changed, also update the user manual (see "User Manual").
+3. Commit the changes to `main` on GitHub.
+4. On GitHub open "Actions", choose "Release" and click "Run workflow". A pushed tag like `v2.1.0` starts it as well.
+5. The workflow runs on a Windows machine of GitHub: it checks that the version history has a section for `APP_VERSION` and that no release of that version exists, installs Inno Setup, runs `build.bat` and publishes the release "ProjectDesk <version>" with the tag `v<version>`, `ProjectDesk_Setup.exe` and `docs/ProjectDesk_User_Manual.pdf`. If a step fails, nothing is published.
+6. Colleagues download the installer from the latest release and install it over the old version, their data is kept. They do not need Python.
+
+Local build for testing: run `build.bat`. Requirements:
+- Python 3 (tested with 3.13), with "Add to PATH" enabled during setup
+- Inno Setup 6 or 7, "Install for me only" is sufficient
+- Result: `installer\ProjectDesk_Setup.exe`
 
 Build notes:
 - PyInstaller works in `%LOCALAPPDATA%\ProjectDeskBuild`, not in the project folder. Reason: if the project folder is inside OneDrive, OneDrive locks the build folders and PyInstaller fails with "access denied".
 - `build.bat` searches Inno Setup in the registry and in the default folders, versions 6 and 7 are found.
+- `build.bat` ends with `pause`. The workflow runs it with the input from `NUL`, so it does not wait.
 - The installer is not signed. Windows may show a SmartScreen warning on first start, which is confirmed with "More info" and "Run anyway".
 
 ## GitHub in the Browser
@@ -109,11 +115,9 @@ Updating files:
 The browser accepts files up to 25 MiB per file. Never upload `data.json`, attachments, images or backups, the browser upload does not use `.gitignore`.
 
 Creating a release:
-1. In the repository click "Releases" on the right and then "Draft a new release" (or "Create a new release").
-2. Under "Choose a tag" type `v` plus the version, for example `v2.0.0`, matching `APP_VERSION`, and choose "Create new tag on publish".
-3. Title for example "ProjectDesk 2.0.0", description from the version history.
-4. Drag `ProjectDesk_Setup.exe` and `docs\ProjectDesk_User_Manual.pdf` into the field for binaries.
-5. Click "Publish release". The link to the latest release can be shared with colleagues.
+1. In the repository click "Actions", choose "Release" on the left and click "Run workflow", then the green button "Run workflow".
+2. After a few minutes the release appears under "Releases" with the installer and the user manual. A red mark in "Actions" means a step failed, its log shows why.
+3. The link to the latest release can be shared with colleagues.
 
 ## User Manual
 
@@ -495,18 +499,25 @@ This way of working has proven itself:
 
 ## Version History
 
+### 2.1.0
+- Text formatting with strikethrough, four font sizes, highlight and numbered lists, in addition to bold, italic, underline and bullet lists
+- Tab and Shift+Tab move list lines one level in or out, numbering continues
+- Numbers of numbered lists line up, also in the PDF export
+- Highlight follows light and dark mode, the PDF export shows list levels, numbers and highlight
+- Checking a todo removes its flag, done todos cannot be flagged
+- Flag and attachment count move to the right edge of todo cards
+- Releases are built and published by the GitHub workflow Release
+
 ### 2.0.0
 - New name ProjectDesk with a new icon, existing ToDo installations and settings are taken over
 - Projects instead of groups and subgroups, with the fixed project "General" and a color dot per project
 - Tabs for todos, notes and links, each with optional groups. Tabs can be hidden in the settings, with one tab the tab row disappears
 - Notes with inline images, PDF export and "Turn into todo" for lines
-- Text formatting with bold, italic, underline, strikethrough, four font sizes, highlight, bullet and numbered lists with levels
 - Links with address and note for web pages, files, folders and network paths
 - Right column can be maximized to the whole window
 - Right click menus instead of icons while hovering
 - Add icon on every group header for new entries directly in the group
 - Created and modified date in the footer of every entry
-- Flag and attachment count move to the right edge of todo cards, checking a todo removes its flag
 - Export and import of entries, groups and projects as `.pdesk` files, also by double click in the Explorer
 - Automatic backups with restore, backups before import, move and restore
 - Undo and redo with Ctrl+Z and Ctrl+Y for every change

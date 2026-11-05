@@ -14,7 +14,9 @@ See [ProjectDesk User Manual](docs/ProjectDesk_User_Manual.pdf).
 
 ## Build
 
-Requirements: Python 3 and Inno Setup. Run `build.bat`, the installer is created at `installer\ProjectDesk_Setup.exe`.
+Releases are built on GitHub: the workflow Release builds the installer on Windows and publishes it with the user manual, see [DEVELOPMENT.md](DEVELOPMENT.md).
+
+For a local build: Python 3 and Inno Setup are required. Run `build.bat`, the installer is created at `installer\ProjectDesk_Setup.exe`.
 
 ## Development
 
@@ -22,5 +24,5 @@ Requirements: Python 3 and Inno Setup. Run `build.bat`, the installer is created
 
 ---
 
-Version 2.0.0  
+Version 2.1.0  
 Daniel Gilinberg
