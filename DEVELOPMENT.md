@@ -47,7 +47,8 @@ ProjectDesk is a Windows application for project based work, visually based on M
 - Projects on the left, each with a color dot, plus the fixed project "General" and an archive
 - Every project has three tabs: todos, notes and links, each with optional groups. Tabs can be hidden in the settings
 - List in the middle, sortable by drag and drop, details of the selected entry on the right, the right column can be maximized
-- Notes with formatted text and inline images, export as PDF, lines can be turned into todos
+- Formatted text with font sizes, highlight, bullet and numbered lists in all text fields
+- Notes with inline images, export as PDF, lines can be turned into todos
 - Entries, groups and whole projects can be exported as `.pdesk` files and imported by colleagues
 - Automatic backups, undo and redo for every change
 - Light and dark mode, zoom, German and English user interface
@@ -200,6 +201,7 @@ Data model rules:
 - Groups are optional and exist separately per tab. `group_id` null means the entry is shown without group above the groups. Entries of a missing group are shown without group
 - Deleting a group keeps its entries, they are shown without group
 - Done todos are shown in the section "Done" at the end of the todo tab, they keep their group for when they are opened again
+- Done todos are never flagged. Checking a todo removes its flag, it stays removed when the todo is opened again. `Todo.from_dict` drops the flag of done todos
 - Projects without color get the next free color of `PROJECT_COLORS` in `AppData.normalize`, the general project starts gray
 - `modified` is set through `touch` whenever the content of an entry changes in the right column. The footer shows "Created" and, if changed later, "Modified"
 - Saving happens automatically 300 ms after every change, through a temporary file and `os.replace`
@@ -334,7 +336,8 @@ Order inside `project_desk.py`:
 | `ItemDelegate` | Paints the cards of all types and the group and done headers, the add icon of groups, inline rename editor |
 | `ProjectListWidget` | Left list: archive toggling, right click menu, drag and drop for projects and items |
 | `ItemListWidget` | Middle list: checkbox and icon clicks, group toggling, add icon, double click rename, multi selection, right click menu, drag and drop |
-| `TitleEdit`, `ElidedLabel`, `DropZone`, `StatusBanner`, `RichTextEdit`, `DescriptionEditor` | Text editing, links, bullets, inline images, editor right click menu, attachment drop zone, blue message bar |
+| `highlight_color`, `is_bullet_list`, `link_ranges` | Helpers of the text editor |
+| `TitleEdit`, `ElidedLabel`, `DropZone`, `StatusBanner`, `RichTextEdit`, `DescriptionEditor` | Text editing with formats, sizes, highlight and lists, links, inline images, editor right click menu, formatting toolbar, attachment drop zone, blue message bar |
 | `ScaledImage`, `ImageViewer`, `AttachmentCard` | Attachments with preview for images and PDF files |
 | Icon functions | `create_..._icon`, all drawn as line icons through `create_line_icon` |
 | Formatting | `backup_label`, `format_date`, `format_timestamp`, `count_text`, `entries_text`, `format_size` |
@@ -369,7 +372,7 @@ Right click menus:
 - Project: Rename, Color, Archive or Restore, Export, Delete. The general project only has Color and Export
 - Free space in the project list: New project, Import
 - Several selected entries: Export, Delete
-- Todo: Flag or Remove flag, Export, Delete
+- Todo: Flag or Remove flag (only open todos), Export, Delete
 - Note: Export as PDF, Export, Delete
 - Link: Open, Copy address, Export, Delete
 - Group header: Rename, Export, Delete
@@ -400,10 +403,17 @@ Colors and highlighting:
 - Projects on the left: hover light blue, selected gray, no accent bar
 - Cards in the middle: hover light blue with a blue accent bar on the left, selected darker blue, also for every entry of a multi selection
 - Flagged todos: yellow background, red title. Selected darker yellow
-- Fixed places on the right of todo cards: flag, then attachment count, the places are always reserved
+- Icons on the right of todo cards move together to the right edge: the attachment count at the edge and the flag left of it. Without attachments the flag sits at the edge. No space is reserved for icons that are not shown
 
 Text editing:
-- Bullets are painted by `RichTextEdit.paintEvent`. Lists internally use the style `ListStyleUndefined`, the PDF export turns them into visible bullets
+- Toolbar (`DescriptionEditor`) for todo descriptions, notes and link notes: bold, italic, underline, strikethrough, then font size and highlight, then bullet list and numbered list. Thin lines separate the three groups. The toolbar never widens the column (size policy `Ignored`)
+- Font sizes are four steps of the editor font: Small, Normal, Large, Extra large (`FONT_SIZE_STEPS`). They are stored as `FontSizeAdjustment` (-1, 0, 1, 2), in the HTML as `font-size:small`, `large` and `x-large`, and follow the zoom. Explicit point sizes and font families are always removed
+- Highlight is a background in `HIGHLIGHT_LIGHT` or `HIGHLIGHT_DARK` (`highlight_color`). When a text is loaded, every background takes the color of the current mode
+- Bullet lists use the style `ListStyleUndefined` and are painted by `RichTextEdit.paintEvent`: dot, ring and square per level. Numbered lists use `ListDecimal` and are painted by Qt. Other list styles from older or pasted text are converted to these two
+- Numbered lists use digits of equal width (`tabular_figures`, OpenType feature `tnum`), so the numbers line up. In the editor this applies to the document font, in the PDF only to the list numbers, because Qt's PDF output loses the text of digits with this feature
+- Tab and Shift+Tab move list lines one level in or out (`RichTextEdit.focusNextPrevChild`, `change_list_level`), up to `LIST_MAX_INDENT` levels. A line joins the list of its new level above it, so numbering continues. Outside lists Tab moves the focus
+- The bullet and numbering buttons create a list, remove the list of the same kind or switch the selected lines to the other kind
+- Format changes over several fragments are collected first and applied afterwards. Changing formats while iterating the fragments of a block crashes when Qt merges fragments
 - A dash or star followed by a space at the start of a line starts a bullet list
 - The placeholder is painted by `RichTextEdit` and is also hidden by an empty bullet
 - Web addresses, `www.` addresses and network paths become links while typing (`LINK_PATTERN`). A click opens them
@@ -414,6 +424,7 @@ Text editing:
 PDF export of notes:
 - A4 at 300 dpi, margins 20 mm, title and creation date at the top, "Page x of y" in the footer
 - Pages are laid out by `write_note_pdf` itself, images get explicit sizes and never exceed the page width or 90 % of the page height
+- Bullets become disc, circle and square per level (`PDF_BULLET_STYLES`), highlight is always printed in `HIGHLIGHT_LIGHT`, the indent per list level is `PDF_LIST_INDENT`
 - The root frame has a small top and bottom margin (`PDF_PAGE_GAP_INCH`), otherwise the first pixel row of an image on the next page shows at the bottom of a page
 
 ## Translations
@@ -489,11 +500,13 @@ This way of working has proven itself:
 - Projects instead of groups and subgroups, with the fixed project "General" and a color dot per project
 - Tabs for todos, notes and links, each with optional groups. Tabs can be hidden in the settings, with one tab the tab row disappears
 - Notes with inline images, PDF export and "Turn into todo" for lines
+- Text formatting with bold, italic, underline, strikethrough, four font sizes, highlight, bullet and numbered lists with levels
 - Links with address and note for web pages, files, folders and network paths
 - Right column can be maximized to the whole window
 - Right click menus instead of icons while hovering
 - Add icon on every group header for new entries directly in the group
 - Created and modified date in the footer of every entry
+- Flag and attachment count move to the right edge of todo cards, checking a todo removes its flag
 - Export and import of entries, groups and projects as `.pdesk` files, also by double click in the Explorer
 - Automatic backups with restore, backups before import, move and restore
 - Undo and redo with Ctrl+Z and Ctrl+Y for every change

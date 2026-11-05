@@ -1,0 +1,19 @@
+# Build output
+installer/
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+
+# Release packages
+*.zip
+
+# Personal data, in case the storage folder is the project folder
+data.json
+data_v1_backup.json
+attachments/
+images/
+backups/

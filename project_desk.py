@@ -21,9 +21,11 @@ from urllib.parse import urlparse
 
 from PySide6.QtCore import QByteArray, QEasingCurve, QEvent, QItemSelectionModel, QMarginsF, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSettings, QSize, QSizeF, QStandardPaths, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QDesktopServices,
     QAction,
+    QActionGroup,
     QDrag,
     QFont,
     QFontMetrics,
@@ -214,6 +216,13 @@ FLAG_SELECTED_DARK = "#5a4721"
 SUBMENU_GAP = 2
 BULLET_INDENT = 18
 BULLET_MARKERS = ("-", "*")
+LIST_MAX_INDENT = 4
+TOOLBAR_SEPARATOR_HEIGHT = 16
+TABULAR_FIGURES_FEATURE = "tnum"
+FONT_SIZE_STEPS = (("Klein", -1, 0.8), ("Normal", 0, 1.0), ("Groß", 1, 1.2), ("Sehr groß", 2, 1.5))
+HIGHLIGHT_LIGHT = "#ffe97a"
+HIGHLIGHT_DARK = "#6b5a10"
+PDF_BULLET_STYLES = (QTextListFormat.Style.ListDisc, QTextListFormat.Style.ListCircle, QTextListFormat.Style.ListSquare)
 COUNT_SLOT_TEXT = "99"
 TODO_MARK = "✓"
 OBJECT_REPLACEMENT_CHARACTER = "￼"
@@ -227,6 +236,7 @@ PDF_RESOLUTION = 300
 PDF_FOOTER_HEIGHT_INCH = 0.35
 PDF_IMAGE_MAX_HEIGHT = 0.9
 PDF_PAGE_GAP_INCH = 0.04
+PDF_LIST_INDENT = 22
 
 ZOOM_STEPS = (0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8, 2.0)
 LANGUAGE_GERMAN = "de"
@@ -421,6 +431,14 @@ TRANSLATIONS = {
     "Archivieren": "Archive",
     "archiviert": "archived",
     "Aufzählung": "Bullet list",
+    "Nummerierung": "Numbered list",
+    "Durchgestrichen": "Strikethrough",
+    "Schriftgröße": "Font size",
+    "Klein": "Small",
+    "Normal": "Normal",
+    "Groß": "Large",
+    "Sehr groß": "Extra large",
+    "Hervorheben": "Highlight",
     "Aus Notiz \"{title}\"": "From note \"{title}\"",
     "Ausschneiden": "Cut",
     "Automatisch sichern": "Back up automatically",
@@ -928,6 +946,7 @@ QToolButton#tabButton:hover {{ background: transparent; color: {self.text.name()
 QToolButton#tabButton:checked {{ background: transparent; color: {self.text.name()}; border-bottom: 2px solid {self.accent.name()}; font-weight: 600; }}
 QFrame#descriptionFrame {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; }}
 QFrame#toolbarLine {{ background: {self.divider.name()}; border: none; }}
+QFrame#toolbarSeparator {{ background: {self.divider_strong.name()}; border: none; margin: 0px 3px; }}
 QTextEdit#descriptionEdit {{ background: transparent; border: none; }}
 QFrame#attachmentCard {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; }}
 QScrollArea#attachmentScroll {{ background: transparent; border: none; }}
@@ -1069,7 +1088,7 @@ class Todo:
             description=str(values.get("description", "")),
             description_html=str(values.get("description_html", "")),
             done=bool(values.get("done", False)),
-            flagged=bool(values.get("flagged", False)),
+            flagged=bool(values.get("flagged", False)) and bool(values.get("done", False)) is False,
             done_at=float(done_at) if done_at is not None else None,
             created=float(values.get("created", 0.0)),
             modified=float(values.get("modified", 0.0)),
@@ -1846,20 +1865,22 @@ class ItemDelegate(QStyledItemDelegate):
         line_height = metrics.height()
         action_size = px(ACTION_SIZE)
 
-        # Fixed places on the right
+        # Icons on the right, the rightmost shown icon sits at the edge
         right = rect.left() + rect.width() - px(CARD_PADDING_H)
         meta_rect = QRectF()
-        if item_type == ITEM_TODO:
-            meta_width = px(ICON_SIZE) + px(META_ICON_SPACING) + metrics.horizontalAdvance(COUNT_SLOT_TEXT)
+        meta_left = right
+        meta_width = 0.0
+        slot_right = right + px(4)
+        count = index.data(COUNT_ROLE) or 0
+        if item_type == ITEM_TODO and count:
+            meta_width = px(ICON_SIZE) + px(META_ICON_SPACING) + metrics.horizontalAdvance(str(count))
             meta_left = right - meta_width
             slot_right = meta_left - px(META_SPACING) + px(4)
-        else:
-            meta_left = right
-            meta_width = 0.0
-            slot_right = right + px(4)
 
         action_lefts: dict[str, float] = {}
         for name in self.action_names(item_type):
+            if self.action_visible(name, index) is False:
+                continue
             action_lefts[name] = slot_right - action_size
             slot_right -= action_size + px(2)
         actions_left = slot_right + px(2)
@@ -1916,7 +1937,7 @@ class ItemDelegate(QStyledItemDelegate):
         for name, action_left in action_lefts.items():
             actions[name] = QRectF(action_left, action_center - action_size / 2, action_size, action_size)
 
-        if item_type == ITEM_TODO:
+        if meta_width > 0:
             meta_rect = QRectF(meta_left, text_top, meta_width, line_height)
 
         return CardGeometry(
@@ -3056,6 +3077,22 @@ class StatusBanner(QWidget):
         painter.end()
 
 
+def tabular_figures(font: QFont) -> QFont:
+    # Digits of equal width, so the numbers of numbered lists line up
+    tabular = QFont(font)
+    tabular.setFeature(QFont.Tag.fromString(TABULAR_FIGURES_FEATURE), 1)
+    return tabular
+
+
+def highlight_color() -> QColor:
+    dark = QApplication.palette().color(QPalette.ColorRole.Base).lightness() < 128
+    return QColor(HIGHLIGHT_DARK if dark else HIGHLIGHT_LIGHT)
+
+
+def is_bullet_list(text_list) -> bool:
+    return text_list is not None and text_list.format().style() == QTextListFormat.Style.ListStyleUndefined
+
+
 def link_ranges(text: str) -> list[tuple[int, int, str]]:
     ranges: list[tuple[int, int, str]] = []
     for match in LINK_PATTERN.finditer(text):
@@ -3089,7 +3126,7 @@ def without_link(char_format: QTextCharFormat) -> QTextCharFormat:
 
 
 class RichTextEdit(QTextEdit):
-    """Text editor with bold, italic, underline, bullet lists, clickable links and optional inline images"""
+    """Text editor with character formats, font sizes, highlight, bullet and numbered lists, clickable links and optional inline images"""
 
     image_activated = Signal(str)
 
@@ -3103,6 +3140,7 @@ class RichTextEdit(QTextEdit):
         self.viewport().setMouseTracking(True)
         self.document().setDocumentMargin(8)
         self.document().setIndentWidth(BULLET_INDENT)
+        self.document().setDefaultFont(tabular_figures(self.font()))
         self.document().contentsChange.connect(self._on_contents_change)
 
         self._placeholder = placeholder
@@ -3116,6 +3154,11 @@ class RichTextEdit(QTextEdit):
 
     def set_storage(self, storage: Optional[Storage]) -> None:
         self._storage = storage
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self.document().setDefaultFont(tabular_figures(self.font()))
 
     # Content
     def load_content(self, html_text: str, plain_text: str) -> None:
@@ -3133,9 +3176,11 @@ class RichTextEdit(QTextEdit):
         self._loading = False
 
     def normalize_document(self) -> None:
-        # Text follows the editor font, links the current palette and bullets are drawn by the editor
+        # Text follows the editor font, sizes are steps of it, links and highlights take the current palette
         link_color = self.palette().color(QPalette.ColorRole.Link)
+        marker_color = highlight_color()
         cursor = QTextCursor(self.document())
+        changes: list[tuple[int, int, QTextCharFormat]] = []
         block = self.document().begin()
         while block.isValid():
             iterator = block.begin()
@@ -3148,22 +3193,41 @@ class RichTextEdit(QTextEdit):
                         char_format.clearProperty(QTextFormat.Property.FontPointSize)
                         char_format.clearProperty(QTextFormat.Property.FontFamilies)
                         changed = True
+                    if char_format.hasProperty(QTextFormat.Property.FontSizeAdjustment) and char_format.property(QTextFormat.Property.FontSizeAdjustment) == 0:
+                        char_format.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+                        changed = True
+                    if char_format.hasProperty(QTextFormat.Property.BackgroundBrush):
+                        if char_format.background().style() == Qt.BrushStyle.NoBrush:
+                            char_format.clearProperty(QTextFormat.Property.BackgroundBrush)
+                        else:
+                            char_format.setBackground(marker_color)
+                        changed = True
                     if char_format.isAnchor():
                         char_format.setForeground(link_color)
                         char_format.setFontUnderline(True)
                         changed = True
                     if changed:
-                        cursor.setPosition(fragment.position())
-                        cursor.setPosition(fragment.position() + fragment.length(), QTextCursor.MoveMode.KeepAnchor)
-                        cursor.setCharFormat(char_format)
+                        changes.append((fragment.position(), fragment.length(), char_format))
                 iterator += 1
 
+            # Bullets are drawn by the editor, numbered lists are always decimal
             text_list = block.textList()
-            if text_list is not None and text_list.format().style() != QTextListFormat.Style.ListStyleUndefined:
+            if text_list is not None:
                 list_format = text_list.format()
-                list_format.setStyle(QTextListFormat.Style.ListStyleUndefined)
-                text_list.setFormat(list_format)
+                style = list_format.style()
+                if style in (QTextListFormat.Style.ListDisc, QTextListFormat.Style.ListCircle, QTextListFormat.Style.ListSquare):
+                    list_format.setStyle(QTextListFormat.Style.ListStyleUndefined)
+                    text_list.setFormat(list_format)
+                elif style not in (QTextListFormat.Style.ListStyleUndefined, QTextListFormat.Style.ListDecimal):
+                    list_format.setStyle(QTextListFormat.Style.ListDecimal)
+                    text_list.setFormat(list_format)
             block = block.next()
+
+        # Formats change after reading, so merged fragments do not disturb the reading
+        for position, length, char_format in changes:
+            cursor.setPosition(position)
+            cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+            cursor.setCharFormat(char_format)
         self.document().setModified(False)
 
     # Links
@@ -3341,19 +3405,28 @@ class RichTextEdit(QTextEdit):
         if self._images:
             self._paint_image_frames(painter)
 
-        # Bullets centered on the lower case letters of the first line
+        # Bullets centered on the lower case letters of the first line: dot, ring and square per level
         radius = max(px(1.8), metrics.xHeight() * 0.2)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self.palette().color(QPalette.ColorRole.Text))
+        text_color = self.palette().color(QPalette.ColorRole.Text)
         block = document.begin()
         while block.isValid():
             layout = block.layout()
-            if block.textList() is not None and block.isVisible() and layout is not None and layout.lineCount() > 0:
+            if is_bullet_list(block.textList()) and block.isVisible() and layout is not None and layout.lineCount() > 0:
                 line = layout.lineAt(0)
                 cursor_rect = self.cursorRect(QTextCursor(block))
-                center_y = cursor_rect.top() + line.ascent() - metrics.xHeight() / 2
-                center_x = cursor_rect.left() - px(BULLET_INDENT) / 2
-                painter.drawEllipse(QPointF(center_x, center_y), radius, radius)
+                center = QPointF(cursor_rect.left() - px(BULLET_INDENT) / 2, cursor_rect.top() + line.ascent() - metrics.xHeight() / 2)
+                level = (block.textList().format().indent() - 1) % 3
+                if level == 1:
+                    painter.setPen(QPen(text_color, px(1)))
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawEllipse(center, radius - px(0.5), radius - px(0.5))
+                else:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(text_color)
+                    if level == 0:
+                        painter.drawEllipse(center, radius, radius)
+                    else:
+                        painter.drawRect(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2))
             block = block.next()
         painter.end()
 
@@ -3404,30 +3477,113 @@ class RichTextEdit(QTextEdit):
         char_format.setFontUnderline(self.fontUnderline() is False)
         self.mergeCurrentCharFormat(char_format)
 
-    def _create_list(self, cursor: QTextCursor) -> None:
+    def toggle_strike_out(self) -> None:
+        char_format = QTextCharFormat()
+        char_format.setFontStrikeOut(self.currentCharFormat().fontStrikeOut() is False)
+        self.mergeCurrentCharFormat(char_format)
+
+    def font_size_step(self) -> int:
+        value = self.currentCharFormat().property(QTextFormat.Property.FontSizeAdjustment)
+        return int(value) if value is not None else 0
+
+    def set_font_size_step(self, step: int) -> None:
+        # Steps relative to the editor font, so they follow the zoom
+        char_format = QTextCharFormat()
+        char_format.setProperty(QTextFormat.Property.FontSizeAdjustment, step)
+        self.mergeCurrentCharFormat(char_format)
+
+    def is_highlighted(self) -> bool:
+        return self.currentCharFormat().background().style() != Qt.BrushStyle.NoBrush
+
+    def toggle_highlight(self) -> None:
+        char_format = QTextCharFormat()
+        char_format.setBackground(QBrush() if self.is_highlighted() else QBrush(highlight_color()))
+        self.mergeCurrentCharFormat(char_format)
+
+    def _create_list(self, cursor: QTextCursor, style: QTextListFormat.Style = QTextListFormat.Style.ListStyleUndefined) -> None:
         list_format = QTextListFormat()
-        list_format.setStyle(QTextListFormat.Style.ListStyleUndefined)
+        list_format.setStyle(style)
         list_format.setIndent(1)
         cursor.createList(list_format)
 
     def toggle_bullets(self) -> None:
+        self._toggle_list(QTextListFormat.Style.ListStyleUndefined)
+
+    def toggle_numbering(self) -> None:
+        self._toggle_list(QTextListFormat.Style.ListDecimal)
+
+    def _toggle_list(self, style: QTextListFormat.Style) -> None:
+        # No list creates one, the same kind removes it, the other kind changes the lists of the selected lines
         cursor = self.textCursor()
+        current = cursor.currentList()
+        blocks = self.selected_blocks()
         cursor.beginEditBlock()
-        if cursor.currentList() is None:
-            self._create_list(cursor)
-        else:
-            end = cursor.selectionEnd()
-            block = self.document().findBlock(cursor.selectionStart())
-            while block.isValid() and block.position() <= end:
+        if current is None:
+            self._create_list(cursor, style)
+        elif current.format().style() == style:
+            for block in blocks:
                 text_list = block.textList()
                 if text_list is not None:
                     text_list.remove(block)
                     block_format = block.blockFormat()
                     block_format.setIndent(0)
                     QTextCursor(block).setBlockFormat(block_format)
-                block = block.next()
+        else:
+            for block in blocks:
+                text_list = block.textList()
+                if text_list is not None and text_list.format().style() != style:
+                    list_format = text_list.format()
+                    list_format.setStyle(style)
+                    text_list.setFormat(list_format)
         cursor.endEditBlock()
         self.cursorPositionChanged.emit()
+
+    def change_list_level(self, step: int) -> bool:
+        # Selected list lines move one level in or out and join the list of that level above them
+        blocks = [block for block in self.selected_blocks() if block.textList() is not None]
+        if not blocks:
+            return False
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        for block in blocks:
+            text_list = block.textList()
+            list_format = QTextListFormat(text_list.format())
+            level = list_format.indent() + step
+            if level < 1 or level > LIST_MAX_INDENT:
+                continue
+            text_list.remove(block)
+            block_format = block.blockFormat()
+            block_format.setIndent(0)
+            QTextCursor(block).setBlockFormat(block_format)
+            target = self._list_above(block, level)
+            if target is not None:
+                target.add(block)
+            else:
+                list_format.setIndent(level)
+                QTextCursor(block).createList(list_format)
+        cursor.endEditBlock()
+        self.cursorPositionChanged.emit()
+        return True
+
+    @staticmethod
+    def _list_above(block, level: int):
+        # The nearest list of that level above, as long as no line of a lower level or outside a list comes first
+        previous = block.previous()
+        while previous.isValid():
+            text_list = previous.textList()
+            if text_list is None or text_list.format().indent() < level:
+                return None
+            if text_list.format().indent() == level:
+                return text_list
+            previous = previous.previous()
+        return None
+
+    def focusNextPrevChild(self, next_child: bool) -> bool:
+        # Tab and Shift+Tab change the level of list lines, elsewhere they move the focus
+        if self.hasFocus() and self.isReadOnly() is False and self.textCursor().currentList() is not None:
+            self.change_list_level(1 if next_child else -1)
+            return True
+        return super().focusNextPrevChild(next_child)
 
     def selected_blocks(self) -> list:
         cursor = self.textCursor()
@@ -3566,11 +3722,16 @@ class DescriptionEditor(QFrame):
         self._edit.textChanged.connect(self.changed.emit)
         self._edit.currentCharFormatChanged.connect(self._update_buttons)
         self._edit.cursorPositionChanged.connect(self._update_buttons)
+        self._separators: list[QFrame] = []
 
         self._bold_button = self._create_button("B", tr("Fett (Strg+B)"), self._edit.toggle_bold)
         self._italic_button = self._create_button("I", tr("Kursiv (Strg+I)"), self._edit.toggle_italic)
         self._underline_button = self._create_button("U", tr("Unterstrichen (Strg+U)"), self._edit.toggle_underline)
+        self._strike_button = self._create_button("S", tr("Durchgestrichen"), self._edit.toggle_strike_out)
+        self._size_button = self._create_size_button()
+        self._highlight_button = self._create_button("", tr("Hervorheben"), self._edit.toggle_highlight)
         self._bullet_button = self._create_button("", tr("Aufzählung"), self._edit.toggle_bullets)
+        self._numbering_button = self._create_button("", tr("Nummerierung"), self._edit.toggle_numbering)
 
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(6, 4, 6, 4)
@@ -3578,10 +3739,20 @@ class DescriptionEditor(QFrame):
         toolbar.addWidget(self._bold_button)
         toolbar.addWidget(self._italic_button)
         toolbar.addWidget(self._underline_button)
-        toolbar.addSpacing(8)
+        toolbar.addWidget(self._strike_button)
+        toolbar.addWidget(self._create_separator())
+        toolbar.addWidget(self._size_button)
+        toolbar.addWidget(self._highlight_button)
+        toolbar.addWidget(self._create_separator())
         toolbar.addWidget(self._bullet_button)
+        toolbar.addWidget(self._numbering_button)
 
         toolbar.addStretch()
+
+        # The toolbar does not widen the column, in a very narrow column its last buttons are cut off
+        toolbar_widget = QWidget()
+        toolbar_widget.setLayout(toolbar)
+        toolbar_widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
         line = QFrame()
         line.setObjectName("toolbarLine")
@@ -3590,7 +3761,7 @@ class DescriptionEditor(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
-        layout.addLayout(toolbar)
+        layout.addWidget(toolbar_widget)
         layout.addWidget(line)
         layout.addWidget(self._edit, 1)
         self.apply_zoom()
@@ -3604,8 +3775,53 @@ class DescriptionEditor(QFrame):
         button.clicked.connect(lambda: self._run(action))
         return button
 
+    def _create_separator(self) -> QFrame:
+        # Thin line between the groups of the toolbar
+        separator = QFrame()
+        separator.setObjectName("toolbarSeparator")
+        separator.setFixedWidth(1)
+        self._separators.append(separator)
+        return separator
+
+    def _create_size_button(self) -> QToolButton:
+        button = QToolButton()
+        button.setToolTip(tr("Schriftgröße"))
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = create_menu(button)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for label, step, scale in FONT_SIZE_STEPS:
+            action = menu.addAction(tr(label), lambda checked=False, selected=step: self._run(lambda: self._edit.set_font_size_step(selected)))
+            action.setCheckable(True)
+            action.setData(step)
+            group.addAction(action)
+        menu.aboutToShow.connect(self._update_size_menu)
+        button.setMenu(menu)
+        self._size_menu = menu
+        return button
+
+    def _update_size_menu(self) -> None:
+        # Every entry is shown in its size, the current size is checked
+        step = self._edit.font_size_step()
+        base_size = QApplication.font().pointSizeF()
+        for action, (label, value, scale) in zip(self._size_menu.actions(), FONT_SIZE_STEPS):
+            action.setChecked(value == step)
+            font = QFont(QApplication.font())
+            font.setPointSizeF(base_size * scale)
+            action.setFont(font)
+
     def _buttons(self) -> list[QToolButton]:
-        return [self._bold_button, self._italic_button, self._underline_button, self._bullet_button]
+        return [
+            self._bold_button,
+            self._italic_button,
+            self._underline_button,
+            self._strike_button,
+            self._size_button,
+            self._highlight_button,
+            self._bullet_button,
+            self._numbering_button,
+        ]
 
     def _run(self, action) -> None:
         action()
@@ -3613,13 +3829,20 @@ class DescriptionEditor(QFrame):
         self._update_buttons()
 
     def _update_buttons(self, *arguments) -> None:
+        current_list = self._edit.textCursor().currentList()
         self._bold_button.setChecked(self._edit.fontWeight() >= QFont.Weight.DemiBold.value)
         self._italic_button.setChecked(self._edit.fontItalic())
         self._underline_button.setChecked(self._edit.fontUnderline())
-        self._bullet_button.setChecked(self._edit.textCursor().currentList() is not None)
+        self._strike_button.setChecked(self._edit.currentCharFormat().fontStrikeOut())
+        self._highlight_button.setChecked(self._edit.is_highlighted())
+        self._bullet_button.setChecked(is_bullet_list(current_list))
+        self._numbering_button.setChecked(current_list is not None and is_bullet_list(current_list) is False)
 
     def apply_theme(self, theme: Theme) -> None:
+        self._size_button.setIcon(create_text_size_icon(theme.text))
+        self._highlight_button.setIcon(create_highlight_icon(theme.text, highlight_color()))
         self._bullet_button.setIcon(create_bullet_icon(theme.text))
+        self._numbering_button.setIcon(create_numbering_icon(theme.text))
 
     def apply_zoom(self) -> None:
         self._edit.document().setIndentWidth(px(BULLET_INDENT))
@@ -3630,7 +3853,10 @@ class DescriptionEditor(QFrame):
             font.setBold(button is self._bold_button)
             font.setItalic(button is self._italic_button)
             font.setUnderline(button is self._underline_button)
+            font.setStrikeOut(button is self._strike_button)
             button.setFont(font)
+        for separator in self._separators:
+            separator.setFixedHeight(ipx(TOOLBAR_SEPARATOR_HEIGHT))
 
     def set_content(self, html_text: str, plain_text: str, storage: Optional[Storage] = None) -> None:
         self._edit.set_storage(storage)
@@ -4224,6 +4450,71 @@ def create_dot_icon(color: QColor) -> QIcon:
     return QIcon(pixmap)
 
 
+def create_text_size_icon(color: QColor) -> QIcon:
+    # Large and small letter T
+    path = QPainterPath()
+    path.moveTo(1.5, 3.0)
+    path.lineTo(9.5, 3.0)
+    path.moveTo(5.5, 3.0)
+    path.lineTo(5.5, 13.0)
+    path.moveTo(9.0, 7.5)
+    path.lineTo(14.5, 7.5)
+    path.moveTo(11.75, 7.5)
+    path.lineTo(11.75, 13.0)
+    return create_line_icon(color, path)
+
+
+def create_highlight_icon(color: QColor, marker: QColor) -> QIcon:
+    # Marker pen above a bar in the highlight color
+    pixmap = QPixmap(32, 32)
+    pixmap.setDevicePixelRatio(2.0)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(marker)
+    painter.drawRoundedRect(QRectF(1.5, 12.5, 13.0, 2.5), 0.8, 0.8)
+    pen = QPen(color, 1.2)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    body = QPainterPath()
+    body.moveTo(9.6, 1.4)
+    body.lineTo(13.4, 5.2)
+    body.lineTo(7.8, 10.8)
+    body.lineTo(5.2, 11.0)
+    body.lineTo(4.0, 9.8)
+    body.lineTo(4.2, 7.2)
+    body.closeSubpath()
+    body.moveTo(4.2, 7.2)
+    body.lineTo(7.8, 10.8)
+    painter.drawPath(body)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def create_numbering_icon(color: QColor) -> QIcon:
+    # Lines with the numbers 1, 2 and 3
+    pixmap = QPixmap(32, 32)
+    pixmap.setDevicePixelRatio(2.0)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    font = QFont(QApplication.font())
+    font.setPixelSize(5)
+    font.setWeight(QFont.Weight.DemiBold)
+    painter.setFont(font)
+    for row in range(3):
+        y = 4.0 + row * 4.0
+        painter.setPen(color)
+        painter.drawText(QRectF(0.0, y - 3.0, 5.0, 6.0), Qt.AlignmentFlag.AlignCenter, str(row + 1))
+        painter.setPen(QPen(color, 1.3))
+        painter.drawLine(QPointF(6.5, y), QPointF(14.0, y))
+    painter.end()
+    return QIcon(pixmap)
+
+
 def create_bullet_icon(color: QColor) -> QIcon:
     pixmap = QPixmap(32, 32)
     pixmap.setDevicePixelRatio(2.0)
@@ -4409,6 +4700,7 @@ def write_note_pdf(path: Path, title: str, subtitle: str, source: QTextDocument,
     font.setPointSizeF(PDF_FONT_SIZE)
     document.setDefaultFont(font)
     document.setDocumentMargin(0)
+    document.setIndentWidth(PDF_LIST_INDENT)
     document.setPageSize(QSizeF(page_width, page_height))
 
     # Space at the top and bottom of every page, so nothing of the next page shows at the page edge
@@ -4442,20 +4734,30 @@ def write_note_pdf(path: Path, title: str, subtitle: str, source: QTextDocument,
     screen_dpi = screen.logicalDotsPerInchY() if screen is not None else 96.0
     device_scale = writer.logicalDpiY() / screen_dpi
 
-    # Visible bullets, images from the storage folder, scaled to fit the page
+    # Visible bullets per level, highlight in the light color, images from the storage folder, scaled to fit the page
     image_cursor = QTextCursor(document)
+    marked: list[tuple[int, int]] = []
     block = document.begin()
     while block.isValid():
         text_list = block.textList()
-        if text_list is not None and text_list.format().style() == QTextListFormat.Style.ListStyleUndefined:
+        if is_bullet_list(text_list):
             list_format = text_list.format()
-            list_format.setStyle(QTextListFormat.Style.ListDisc)
+            list_format.setStyle(PDF_BULLET_STYLES[(list_format.indent() - 1) % len(PDF_BULLET_STYLES)])
             text_list.setFormat(list_format)
+        elif text_list is not None:
+            # Only the numbers of the list get digits of equal width, the text stays searchable
+            number_format = QTextCharFormat(block.charFormat())
+            number_format.setFontFeatures({QFont.Tag.fromString(TABULAR_FIGURES_FEATURE): 1})
+            QTextCursor(block).setBlockCharFormat(number_format)
         iterator = block.begin()
         while iterator.atEnd() is False:
             fragment = iterator.fragment()
             iterator += 1
-            if fragment.isValid() is False or fragment.charFormat().isImageFormat() is False:
+            if fragment.isValid() is False:
+                continue
+            if fragment.charFormat().background().style() != Qt.BrushStyle.NoBrush:
+                marked.append((fragment.position(), fragment.length()))
+            if fragment.charFormat().isImageFormat() is False:
                 continue
             image_format = fragment.charFormat().toImageFormat()
             image = QImage(str(storage.note_image_path(image_format.name())))
@@ -4472,6 +4774,12 @@ def write_note_pdf(path: Path, title: str, subtitle: str, source: QTextDocument,
             image_cursor.setPosition(fragment.position() + fragment.length(), QTextCursor.MoveMode.KeepAnchor)
             image_cursor.setCharFormat(image_format)
         block = block.next()
+    marked_format = QTextCharFormat()
+    marked_format.setBackground(QColor(HIGHLIGHT_LIGHT))
+    for position, length in marked:
+        image_cursor.setPosition(position)
+        image_cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        image_cursor.mergeCharFormat(marked_format)
 
     # Pages with page number at the bottom right
     footer_font = QFont(font)
@@ -6181,6 +6489,7 @@ class MainWindow(QMainWindow):
         touch(todo)
         if done:
             todo.done_at = time.time()
+            todo.flagged = False
         else:
             todo.done_at = None
             project.todos.remove(todo)
@@ -6367,8 +6676,9 @@ class MainWindow(QMainWindow):
                 return
 
             if self._tab == ITEM_TODO:
-                flag_text = tr("Markierung entfernen") if item.flagged else tr("Markieren")
-                menu.addAction(create_flag_icon(text_color), flag_text, lambda: self._on_item_action("flag", item.id))
+                if item.done is False:
+                    flag_text = tr("Markierung entfernen") if item.flagged else tr("Markieren")
+                    menu.addAction(create_flag_icon(text_color), flag_text, lambda: self._on_item_action("flag", item.id))
             elif self._tab == ITEM_NOTE:
                 menu.addAction(create_pdf_icon(text_color), tr("Als PDF exportieren"), lambda: self._export_note_pdf(item))
             else:
