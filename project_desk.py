@@ -67,7 +67,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -107,7 +106,7 @@ except ImportError:
 # Constants
 APP_NAME = "ProjectDesk"
 APP_TITLE = "Project Desk"
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.1"
 UPDATE_API_URL = "https://api.github.com/repos/giliiiD/ProjectDesk/releases/latest"
 RELEASES_URL = "https://github.com/giliiiD/ProjectDesk/releases/latest"
 UPDATE_CHECK_DELAY_MS = 3000
@@ -312,9 +311,10 @@ LINK_PATTERN = re.compile(r"(?:https?://|file:///?|www\.)[^\s<>\"]+|\\\\[^\s<>\"
 LINK_TRAILING_CHARACTERS = ".,;:!?)]}'\""
 NOTE_IMAGE_PATTERN = re.compile(IMAGE_FOLDER_NAME + r"/[0-9a-f]+\.png")
 
-DIALOG_TEXT_WIDTH = 340
+DIALOG_TEXT_WIDTH = 320
 DIALOG_ICON_SIZE = 32
-DIALOG_BUTTON_WIDTH = 88
+DIALOG_BUTTON_WIDTH = 75
+DIALOG_FONT_SIZE = 9.0
 DIALOG_INFO = "info"
 DIALOG_WARNING = "warning"
 DIALOG_ERROR = "error"
@@ -507,6 +507,7 @@ TRANSLATIONS = {
     "{entries} ausgewählt": "{entries} selected",
     "{entries} löschen?": "Delete {entries}?",
     "{entries} mit {count} Anhängen löschen?": "Delete {entries} with {count} attachments?",
+    "{entries} mit 1 Anhang löschen?": "Delete {entries} with 1 attachment?",
     "{count} Links": "{count} links",
     "{count} Notizen": "{count} notes",
     "{count} offen": "{count} open",
@@ -631,6 +632,7 @@ TRANSLATIONS = {
     "ToDo": "Todo",
     "ToDo \"{title}\" löschen?": "Delete todo \"{title}\"?",
     "ToDo \"{title}\" mit {count} Anhängen löschen?": "Delete todo \"{title}\" with {count} attachments?",
+    "ToDo \"{title}\" mit 1 Anhang löschen?": "Delete todo \"{title}\" with 1 attachment?",
     "ToDos": "Todos",
     "Trotzdem schließen": "Close anyway",
     "Türkis": "Teal",
@@ -722,7 +724,7 @@ class DialogIcon(QWidget):
     def __init__(self, kind: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._kind = kind
-        self.setFixedSize(ipx(DIALOG_ICON_SIZE), ipx(DIALOG_ICON_SIZE))
+        self.setFixedSize(DIALOG_ICON_SIZE, DIALOG_ICON_SIZE)
 
     def paintEvent(self, event) -> None:
         size = float(self.width())
@@ -769,23 +771,27 @@ class DialogIcon(QWidget):
 
 
 def create_message_dialog(parent: Optional[QWidget], kind: str, text: str) -> tuple[QDialog, QHBoxLayout]:
-    # Text with icon on top, buttons in a gray bar below, like the message boxes of Windows
+    # Text with icon on top, buttons in a gray bar below, in the size of the message boxes of Windows, independent of the zoom
     dialog = QDialog(parent)
     dialog.setWindowTitle(APP_TITLE)
     dialog.setObjectName("messageDialog")
     dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+    font = QFont(QApplication.font())
+    font.setPointSizeF(DIALOG_FONT_SIZE)
+    dialog.setFont(font)
 
     content = QWidget()
     content.setObjectName("dialogContent")
     content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     content_layout = QHBoxLayout(content)
-    content_layout.setContentsMargins(ipx(24), ipx(22), ipx(28), ipx(26))
-    content_layout.setSpacing(ipx(16))
+    content_layout.setContentsMargins(20, 20, 24, 22)
+    content_layout.setSpacing(12)
     content_layout.addWidget(DialogIcon(kind), 0, Qt.AlignmentFlag.AlignTop)
     label = QLabel(text)
+    label.setFont(font)
     label.setWordWrap(True)
-    label.setMinimumWidth(ipx(DIALOG_TEXT_WIDTH))
+    label.setMinimumWidth(DIALOG_TEXT_WIDTH)
     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     content_layout.addWidget(label, 1, Qt.AlignmentFlag.AlignVCenter)
@@ -793,8 +799,8 @@ def create_message_dialog(parent: Optional[QWidget], kind: str, text: str) -> tu
     bar = QFrame()
     bar.setObjectName("dialogButtonBar")
     buttons = QHBoxLayout(bar)
-    buttons.setContentsMargins(ipx(24), ipx(14), ipx(24), ipx(14))
-    buttons.setSpacing(ipx(8))
+    buttons.setContentsMargins(20, 10, 12, 10)
+    buttons.setSpacing(8)
     buttons.addStretch()
 
     layout = QVBoxLayout(dialog)
@@ -808,7 +814,9 @@ def create_message_dialog(parent: Optional[QWidget], kind: str, text: str) -> tu
 
 def add_dialog_button(dialog: QDialog, buttons: QHBoxLayout, text: str, result: int, default: bool = False) -> QPushButton:
     button = QPushButton(text)
-    button.setMinimumWidth(ipx(DIALOG_BUTTON_WIDTH))
+    button.setObjectName("dialogButton")
+    button.setFont(dialog.font())
+    button.setMinimumWidth(DIALOG_BUTTON_WIDTH)
     button.setAutoDefault(False)
     button.setDefault(default)
     button.clicked.connect(lambda checked=False: dialog.done(result))
@@ -1020,6 +1028,7 @@ QPushButton:hover {{ background: {self.hover.name()}; }}
 QPushButton:pressed {{ background: {self.selected.name()}; }}
 QPushButton:disabled {{ color: {self.muted.name()}; }}
 QPushButton:default {{ border-color: {self.accent.name()}; }}
+QPushButton#dialogButton {{ padding: 3px 10px; }}
 QScrollBar:vertical {{ background: transparent; width: 12px; margin: 0px; }}
 QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 0px; }}
 QScrollBar::handle:vertical {{ background: {self.scroll_handle.name()}; border-radius: 3px; min-height: 32px; margin: 2px 3px; }}
@@ -1815,6 +1824,17 @@ def paint_check(painter: QPainter, rect: QRectF, done: bool, radius: float, them
         painter.drawRoundedRect(rect, radius, radius)
 
 
+def icon_left_inset(icon: QIcon, size: int) -> float:
+    # Empty space left of the drawing of an icon, in logical pixels
+    scale = 4
+    image = icon.pixmap(QSize(size * scale, size * scale)).toImage()
+    for x in range(image.width()):
+        for y in range(image.height()):
+            if image.pixelColor(x, y).alpha() > 64:
+                return x / (image.width() / size)
+    return 0.0
+
+
 def create_inline_editor(parent: QWidget) -> QLineEdit:
     editor = QLineEdit(parent)
     editor.setObjectName("inlineEdit")
@@ -1961,6 +1981,7 @@ class ItemDelegate(QStyledItemDelegate):
         self._condition_icons = {}
         for state, color in (("", value.muted), (CONDITION_OVERDUE, value.flag), (CONDITION_DUE, value.flag), (CONDITION_STARTED, value.accent)):
             self._condition_icons[state] = (create_calendar_icon(color), create_milestone_icon(color))
+        self._icon_insets: dict[tuple[int, int], float] = {}
         lead_color = value.text if value.is_dark else value.accent
         self._note_icon = create_note_icon(lead_color)
         self._link_icon = create_link_icon(lead_color)
@@ -2036,10 +2057,10 @@ class ItemDelegate(QStyledItemDelegate):
             if has_detail_line(index):
                 detail_rect = QRectF(text_left, text_top + title_height + px(DETAIL_LINE_SPACING), text_width, detail_height)
         else:
-            # Notes and links: title and subtitle centered vertically
+            # Notes and links have the same height with and without subtitle, title and subtitle are centered vertically
             subtitle = index.data(SUBTITLE_ROLE) or ""
             text_height = title_height + (px(SUBTITLE_SPACING) + line_height if subtitle else 0.0)
-            inner_height = max(text_height, lead_size) + px(CARD_PADDING_V) * 2
+            inner_height = max(title_height + px(SUBTITLE_SPACING) + line_height, lead_size) + px(CARD_PADDING_V) * 2
             text_top = card_top + (inner_height - text_height) / 2
             if subtitle:
                 subtitle_rect = QRectF(text_left, text_top + title_height + px(SUBTITLE_SPACING), text_width, line_height)
@@ -2233,11 +2254,20 @@ class ItemDelegate(QStyledItemDelegate):
                 badges_width += px(META_ICON_SPACING) + metrics.horizontalAdvance(badge_text)
         icon_top = round(line.top() + (line.height() - icon_size) / 2)
 
-        painter.save()
-        painter.setClipRect(line)
-        painter.setFont(detail_font)
-        left = line.left()
+        # The drawing of the first icon starts where the first letter of the title starts
         condition = index.data(CONDITION_ROLE) or ""
+        if condition:
+            date_icon, text_icon = self._condition_icons.get(index.data(STATE_ROLE) or "", self._condition_icons[""])
+            first_icon = date_icon if index.data(CONDITION_KIND_ROLE) == "date" else text_icon
+        else:
+            first_icon = badges[0][0]
+        title = (index.data(Qt.ItemDataRole.DisplayRole) or "").lstrip()
+        bearing = max(0.0, QFontMetricsF(font).leftBearing(title[0])) if title else 0.0
+        left = line.left() + bearing - self._icon_inset(first_icon, icon_size)
+
+        painter.save()
+        painter.setClipRect(line.adjusted(-px(4), 0, 0, 0))
+        painter.setFont(detail_font)
         if condition:
             state = index.data(STATE_ROLE) or ""
             if state in (CONDITION_OVERDUE, CONDITION_DUE):
@@ -2246,9 +2276,7 @@ class ItemDelegate(QStyledItemDelegate):
                 painter.setPen(self.theme.accent)
             else:
                 painter.setPen(self.theme.muted)
-            date_icon, text_icon = self._condition_icons.get(state, self._condition_icons[""])
-            condition_icon = date_icon if index.data(CONDITION_KIND_ROLE) == "date" else text_icon
-            condition_icon.paint(painter, QRect(round(left), icon_top, icon_size, icon_size))
+            first_icon.paint(painter, QRect(round(left), icon_top, icon_size, icon_size))
             left += icon_size + px(META_ICON_SPACING)
             available = max(px(20), line.right() - left - badges_width)
             elided = QFontMetrics(detail_font).elidedText(condition, Qt.TextElideMode.ElideRight, round(available))
@@ -2266,6 +2294,12 @@ class ItemDelegate(QStyledItemDelegate):
                 left += width
             left += px(DETAIL_SPACING)
         painter.restore()
+
+    def _icon_inset(self, icon: QIcon, size: int) -> float:
+        key = (icon.cacheKey(), size)
+        if key not in self._icon_insets:
+            self._icon_insets[key] = icon_left_inset(icon, size)
+        return self._icon_insets[key]
 
     def _paint_lead(self, painter: QPainter, rect: QRectF, item_type: str, done: bool, selected: bool, index) -> None:
         # The circle behind the icon stands out from the selected card
@@ -4927,7 +4961,9 @@ def todo_condition(todo: Todo, today: Optional[date] = None) -> tuple[str, str]:
 
 
 def has_detail_line(index) -> bool:
-    # Second line of a todo card: condition, steps, attachments or description
+    # Second line of an open todo card: condition, steps, attachments or description
+    if index.data(DONE_ROLE):
+        return False
     return bool(index.data(CONDITION_ROLE) or index.data(STEPS_ROLE) or index.data(COUNT_ROLE) or index.data(DESCRIPTION_ROLE))
 
 
@@ -5692,7 +5728,8 @@ class TodoPanel(ItemPanel):
         self._attachment_scroll.setWidget(attachment_container)
         self._attachment_scroll.viewport().setAutoFillBackground(False)
 
-        self.body_layout.addLayout(create_field_grid([(tr("Bedingung"), condition_row)]))
+        self.body_layout.addWidget(create_section_label(tr("Bedingung")))
+        self.body_layout.addWidget(condition_row)
         self.body_layout.addSpacing(10)
         self.body_layout.addWidget(create_section_label(tr("Schritte")))
         self.body_layout.addWidget(self._steps)
@@ -6057,20 +6094,6 @@ class NotePanel(ItemPanel):
             ImageViewer(pixmap, self._item.title if self._item is not None else APP_TITLE, self.window()).exec()
 
 
-def create_field_grid(rows: list[tuple[str, QWidget]]) -> QGridLayout:
-    grid = QGridLayout()
-    grid.setContentsMargins(0, 0, 0, 0)
-    grid.setHorizontalSpacing(12)
-    grid.setVerticalSpacing(8)
-    grid.setColumnStretch(1, 1)
-    for row, (label_text, widget) in enumerate(rows):
-        label = QLabel(label_text)
-        label.setObjectName("mutedLabel")
-        grid.addWidget(label, row, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        grid.addWidget(widget, row, 1)
-    return grid
-
-
 class LinkPanel(ItemPanel):
     """Title, address and note of the selected link"""
 
@@ -6084,7 +6107,8 @@ class LinkPanel(ItemPanel):
         self._note_editor.changed.connect(self._on_note_changed)
         self._title_edit.submitted.connect(lambda: self._url_edit.setFocus())
 
-        self.body_layout.addLayout(create_field_grid([(tr("Adresse"), self._url_edit)]))
+        self.body_layout.addWidget(create_section_label(tr("Adresse")))
+        self.body_layout.addWidget(self._url_edit)
         self.body_layout.addSpacing(10)
         self.body_layout.addWidget(create_section_label(tr("Notiz")))
         self.body_layout.addWidget(self._note_editor, 1)
@@ -6544,6 +6568,9 @@ class MainWindow(QMainWindow):
             panel.apply_zoom()
         if self._sidebar_collapsed:
             self._apply_sidebar_state()
+        # Lists take the application font, on Windows they otherwise keep the smaller list font of the system
+        for view in self.findChildren(QAbstractItemView):
+            view.setFont(QApplication.font())
         self._project_list.scheduleDelayedItemsLayout()
         self._item_list.verticalScrollBar().setSingleStep(ipx(LIST_SCROLL_STEP))
         self._item_list.relayout()
@@ -6906,10 +6933,7 @@ class MainWindow(QMainWindow):
             flags |= Qt.ItemFlag.ItemIsDragEnabled
 
         if item_type == ITEM_NOTE:
-            subtitle = format_date(item.created) if item.created else ""
-            preview = note_preview(item)
-            if preview:
-                subtitle = subtitle + "   " + preview if subtitle else preview
+            subtitle = note_preview(item)
         elif item_type == ITEM_LINK:
             subtitle = item.url
             tooltip = item.url
@@ -7437,7 +7461,9 @@ class MainWindow(QMainWindow):
             return
 
         title = item_title(item) if item_title(item).strip() else tr("ohne Titel")
-        if item_type == ITEM_TODO and item.attachments:
+        if item_type == ITEM_TODO and len(item.attachments) == 1:
+            message = tr("ToDo \"{title}\" mit 1 Anhang löschen?", title=title)
+        elif item_type == ITEM_TODO and item.attachments:
             message = tr("ToDo \"{title}\" mit {count} Anhängen löschen?", title=title, count=len(item.attachments))
         else:
             message = tr(DELETE_MESSAGES[item_type], title=title)
@@ -7470,7 +7496,9 @@ class MainWindow(QMainWindow):
             return
 
         attachments = sum(len(item.attachments) for item in items) if item_type == ITEM_TODO else 0
-        if attachments:
+        if attachments == 1:
+            message = tr("{entries} mit 1 Anhang löschen?", entries=count_text(item_type, len(items)))
+        elif attachments:
             message = tr("{entries} mit {count} Anhängen löschen?", entries=count_text(item_type, len(items)), count=attachments)
         else:
             message = tr("{entries} löschen?", entries=count_text(item_type, len(items)))

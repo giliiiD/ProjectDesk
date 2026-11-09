@@ -199,10 +199,10 @@ def write_chapters(manual: Manual) -> None:
 <li>{ui("Rename")}: double-click the todo in the list or edit the title on the right.</li>
 </ul>
 <h3>In the list</h3>
-<p>Long titles are shortened in the list. Point at a todo to see the full title. Below the title, a todo shows what it contains: the condition, the progress of its steps, the number of attachments and an icon when it has a description.</p>
+<p>Long titles are shortened in the list. Point at a todo to see the full title. Below the title, an open todo shows what it contains: the condition, the progress of its steps, the number of attachments and an icon when it has a description. Done todos show only their title.</p>
 {manual.figure("todo_cards.png", "Todos with condition, steps, attachment and description", size=72)}
 <h3>Condition</h3>
-<p>A todo can have a condition: {ui("Until")} for a deadline or {ui("From")} for the earliest start. Choose the kind next to {ui("Condition")} and enter a date such as 14.11. or 2026-11-14, or a text such as "design approval". The calendar icon selects a date, {ui("None")} removes the condition.</p>
+<p>A todo can have a condition: {ui("Until")} for a deadline or {ui("From")} for the earliest start. Choose the kind below {ui("Condition")} and enter a date such as 14.11. or 2026-11-14, or a text such as "design approval". The calendar icon selects a date, {ui("None")} removes the condition.</p>
 {manual.figure("condition.png", "Selecting a deadline in the calendar", size=62)}
 <p>In the list a calendar icon stands before a date and a diamond before a text. A deadline that is today or past is red, a start date that has been reached is blue.</p>
 <h3>Steps</h3>

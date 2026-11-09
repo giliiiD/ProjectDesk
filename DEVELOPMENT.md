@@ -251,6 +251,9 @@ Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\T
 - Every todo card has the same height (`TODO_PADDING_V`), checkbox and flag are centered vertically
 - The title is always one line and is shortened with an ellipsis when it does not fit (`CardGeometry.title_elided`). The tooltip of the card then shows the full title, for links followed by the address. The same applies to notes and links
 - The second line (`has_detail_line`, `_paint_detail_line`) is smaller and lighter (`DETAIL_FONT_SCALE`, `DETAIL_ICON_SIZE`) and shows, from left to right and only when present: condition, progress of the steps, number of attachments and an icon for a description (`DESCRIPTION_ROLE`). Without a second line the title is centered vertically
+- The drawing of the first icon starts where the first letter of the title starts: the empty space inside the icon (`icon_left_inset`, cached per icon) and the left bearing of the first letter are taken into account
+- Done todos show no second line, only the struck through title. Reopening a todo shows the second line again, the data is kept
+- Note and link cards have one height with and without second line. The second line of a note is the start of its text (`note_preview`), of a link its address
 - The flag of a flagged todo always sits at the right edge (`CardGeometry.flag_rect`). It only marks the todo, flag and remove flag are in the right-click menu
 
 ## Update Notice
@@ -362,6 +365,7 @@ Import:
 
 - All dialogs use `show_message`, `confirm` and `ask`, never `QMessageBox`
 - Layout like Windows message boxes: text with an icon in the content area, buttons right-aligned in a gray bar below. Windows adds the title bar "Project Desk" and the rounded corners
+- Size like Windows message boxes and independent of the zoom: font `DIALOG_FONT_SIZE` (9 pt), buttons at least `DIALOG_BUTTON_WIDTH` (75 px) wide, fixed margins. Label and buttons get the font explicitly, since the application style sheet would otherwise give them the application font
 - Icons (`DialogIcon`): info for hints and questions such as import or moving data, warning for deleting, removing, restoring and closing without saving, error for failures
 - "Cancel" is the default button of questions
 - Short messages appear in a blue bar across the full window width, as high as the footers (`StatusBanner`). It slides in from the bottom and back after 2.5 seconds
@@ -414,7 +418,7 @@ General:
 - The header of the right column shows the title and the maximize icon, no other buttons
 - Renaming by double-click or through "Rename" in the right-click menu
 - Deleting always asks through `confirm` (warning icon, buttons "Delete" and "Cancel"). The only exception are todo steps, Ctrl+Z brings them back
-- The right column of todos has the headings Condition (left of the row), Steps, Description and Attachments (above their content)
+- The right column has headings above the content: Condition, Steps, Description and Attachments for todos, Address and Note for links
 - Questions with more than two answers use `ask`
 - Menus are always created with `create_menu`, for rounded corners and submenus next to their parent. Menu entries have line icons where available
 - Icons are line icons drawn with `create_line_icon`, no emojis and no Qt standard icons. Only the dialog icons info, warning and error are filled, as in Windows
@@ -493,7 +497,8 @@ PDF export of notes:
 
 - All pixel sizes use `px(value)` (float) or `ipx(value)` (integer)
 - Fonts follow the application font, headings use `header_font`
-- After a zoom change `MainWindow._apply_zoom` updates the sizes and reapplies the style sheet, so all widgets take the new font
+- After a zoom change `MainWindow._apply_zoom` updates the sizes and reapplies the style sheet, so all widgets take the new font. Lists (`QAbstractItemView`) get the application font explicitly, because Windows gives them a list font of its own that ignores the application font
+- Dialogs do not follow the zoom (see Dialogs and Messages)
 - New widgets with fixed sizes must be added to `_apply_zoom` or to their own `apply_zoom`
 
 ## Code Style
@@ -549,6 +554,15 @@ Check on Windows after related changes, since offscreen mode cannot show them:
 - The installer is not signed
 
 ## Version History
+
+### 2.4.1
+- Done todos show only their title, reopening shows the second line again
+- The first icon of the second line starts exactly below the first letter of the title
+- Condition and address have headings above them like steps, description and attachments
+- Notes show the start of their text as second line, without the date. Note and link cards have one height
+- Dialogs have the size of Windows message boxes and no longer grow with the zoom
+- Delete questions say "1 attachment" instead of "1 attachments"
+- Lists always use the application font, so they follow the zoom on Windows
 
 ### 2.4.0
 - Todos can have steps: a checklist in the right column, the card shows the progress such as "2/5"
