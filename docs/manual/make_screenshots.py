@@ -270,8 +270,11 @@ class Shooter:
         covered: list[QRect] = []
 
         def grab() -> None:
+            # The menu opens directly above the settings button, as on Windows
             popup = QApplication.activePopupWidget()
-            covered.append(self.compose(self.popup_widgets(popup, path), name))
+            button = self.window._settings_button
+            origin = button.mapTo(self.window, QPoint(0, -popup.height() - 2))
+            covered.append(self.compose(self.popup_widgets(popup, path, origin), name))
             popup.close()
         QTimer.singleShot(MENU_DELAY_MS, grab)
         self.window._settings_button.showMenu()
@@ -430,7 +433,7 @@ def main() -> int:
     app_module.UpdateState.url = app_module.RELEASES_URL
     window._update_settings_icons()
     covered = shooter.settings_menu("settings_update", [])
-    crops["settings_update"] = QRect(0, covered.top() - 40, covered.right() + 40, window.height() - covered.top() + 40)
+    crops["settings_update"] = QRect(0, covered.bottom() - 128, covered.right() + 40, window.height() - covered.bottom() + 128)
     app_module.UpdateState.version = ""
     window._update_settings_icons()
     (BUILD / "crops.json").write_text(json.dumps({name: [rect.x(), rect.y(), rect.width(), rect.height()] for name, rect in crops.items()}), encoding="utf-8")

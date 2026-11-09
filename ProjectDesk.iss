@@ -1,4 +1,5 @@
-#define AppName "ProjectDesk"
+#define AppName "Project Desk"
+#define AppFolder "ProjectDesk"
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -12,7 +13,7 @@ AppId={{D5C1F394-F96F-4775-A084-433911723958}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName}
-DefaultDirName={localappdata}\Programs\{#AppName}
+DefaultDirName={localappdata}\Programs\{#AppFolder}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=auto
@@ -42,10 +43,12 @@ Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\ToDo.exe"
 Type: files; Name: "{autoprograms}\ToDo.lnk"
 Type: files; Name: "{autodesktop}\ToDo.lnk"
+Type: files; Name: "{autoprograms}\ProjectDesk.lnk"
+Type: files; Name: "{autodesktop}\ProjectDesk.lnk"
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\.pdesk"; ValueType: string; ValueName: ""; ValueData: "ProjectDesk.File"; Flags: uninsdeletevalue
-Root: HKA; Subkey: "Software\Classes\ProjectDesk.File"; ValueType: string; ValueName: ""; ValueData: "ProjectDesk Export"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\ProjectDesk.File"; ValueType: string; ValueName: ""; ValueData: "Project Desk Export"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\ProjectDesk.File\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"
 Root: HKA; Subkey: "Software\Classes\ProjectDesk.File\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
 

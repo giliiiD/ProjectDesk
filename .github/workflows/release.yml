@@ -59,4 +59,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh release create "v$VERSION" installer/ProjectDesk_Setup.exe docs/ProjectDesk_User_Manual.pdf --title "ProjectDesk $VERSION" --notes-file release_notes.md --target "$GITHUB_SHA"
+        run: gh release create "v$VERSION" installer/ProjectDesk_Setup.exe docs/ProjectDesk_User_Manual.pdf --title "Project Desk $VERSION" --notes-file release_notes.md --target "$GITHUB_SHA"

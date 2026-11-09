@@ -1,28 +1,28 @@
-# ProjectDesk
+# Project Desk
 
-Windows application for project based work: every project has todos, notes and links, with formatted text, images and attachments. Entries, groups and whole projects can be shared with colleagues as `.pdesk` files.
+Project Desk is a Windows app for project-based work. Each project holds its todos, notes and links, with formatted text, images and attachments. Entries, groups and entire projects can be shared with colleagues as `.pdesk` files.
 
-![ProjectDesk](docs/screenshot.png)
+![Project Desk](docs/screenshot.png)
 
 ## Installation
 
-Download `ProjectDesk_Setup.exe` from the latest release and run it. No administrator rights are needed. An existing ToDo installation is updated, the data is kept.
+1. Download `ProjectDesk_Setup.exe` from the [latest release](https://github.com/giliiiD/ProjectDesk/releases/latest).
+2. If Windows blocks the file, right-click it, choose **Properties**, select **Unblock** on the **General** tab and click **OK**.
+3. Run the setup. No administrator rights are required. If SmartScreen shows a warning, click **More info** and then **Run anyway**.
+
+New versions install over the existing one. Data and settings are kept.
 
 ## User Manual
 
-See [ProjectDesk User Manual](docs/ProjectDesk_User_Manual.pdf).
-
-## Build
-
-Releases are built on GitHub: the workflow Release builds the installer on Windows and publishes it with the user manual, see [DEVELOPMENT.md](DEVELOPMENT.md).
-
-For a local build: Python 3 and Inno Setup are required. Run `build.bat`, the installer is created at `installer\ProjectDesk_Setup.exe`.
+[Project Desk User Manual (PDF)](docs/ProjectDesk_User_Manual.pdf)
 
 ## Development
 
-[DEVELOPMENT.md](DEVELOPMENT.md) is the project documentation: purpose, architecture, data format, design rules, testing, release steps and version history. To extend ProjectDesk in a new chat or as a new developer, start with its section "Quick Start for a New Chat" and provide `DEVELOPMENT.md` together with `project_desk.py`.
+[DEVELOPMENT.md](DEVELOPMENT.md) is the project documentation: architecture, data format, design rules, testing and the release process. To continue development in a new chat, provide `DEVELOPMENT.md` and `project_desk.py` and start with the section "Quick Start for a New Chat".
+
+Releases are built and published by the GitHub workflow **Release**. For a local build, install Python 3 and Inno Setup and run `build.bat`. The installer is written to `installer\ProjectDesk_Setup.exe`.
 
 ---
 
-Version 2.3.0  
+Version 2.3.1  
 Daniel Gilinberg

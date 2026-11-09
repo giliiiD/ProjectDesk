@@ -106,7 +106,8 @@ except ImportError:
 
 # Constants
 APP_NAME = "ProjectDesk"
-APP_VERSION = "2.3.0"
+APP_TITLE = "Project Desk"
+APP_VERSION = "2.3.1"
 UPDATE_API_URL = "https://api.github.com/repos/giliiiD/ProjectDesk/releases/latest"
 RELEASES_URL = "https://github.com/giliiiD/ProjectDesk/releases/latest"
 UPDATE_CHECK_DELAY_MS = 3000
@@ -196,6 +197,7 @@ TOOLTIP_ROLE = Qt.ItemDataRole.UserRole + 12
 DONE_ROLE = Qt.ItemDataRole.UserRole + 14
 COLOR_ROLE = Qt.ItemDataRole.UserRole + 15
 STATE_ROLE = Qt.ItemDataRole.UserRole + 16
+CONDITION_ROLE = Qt.ItemDataRole.UserRole + 17
 
 KIND_PROJECT = "project"
 KIND_ARCHIVE_HEADER = "archive_header"
@@ -234,6 +236,8 @@ CONDITION_OVERDUE = "overdue"
 CONDITION_DUE = "due"
 CONDITION_STARTED = "started"
 CONDITION_NEXT_YEAR_DAYS = 183
+CONDITION_SPACING = 12.0
+CONDITION_MAX_SHARE = 0.45
 DAY_CHECK_MS = 60000
 TOOLBAR_SEPARATOR_HEIGHT = 16
 TABULAR_FIGURES_FEATURE = "tnum"
@@ -500,8 +504,8 @@ TRANSLATIONS = {
     "Daten verschieben …": "Move data …",
     "Der neue Speicherort darf nicht im bisherigen Ordner liegen.": "The new storage location must not be inside the current folder.",
     "Der Speicherort\n{folder}\nwurde nicht gefunden. Bitte einen Ordner wählen.": "The storage location\n{folder}\nwas not found. Please choose a folder.",
-    "Die Datei ist keine ProjectDesk-Datei oder beschädigt.": "The file is not a ProjectDesk file or it is damaged.",
-    "Die Datei stammt aus einer neueren Version von ProjectDesk. Bitte ProjectDesk aktualisieren.": "The file comes from a newer version of ProjectDesk. Please update ProjectDesk.",
+    "Die Datei ist keine Project-Desk-Datei oder beschädigt.": "The file is not a Project Desk file or it is damaged.",
+    "Die Datei stammt aus einer neueren Version von Project Desk. Bitte Project Desk aktualisieren.": "The file comes from a newer version of Project Desk. Please update Project Desk.",
     "Die Daten in\n{folder}\nkonnten nicht geladen werden:\n{error}": "The data in\n{folder}\ncould not be loaded:\n{error}",
     "Die Daten in\n{folder}\nkonnten nicht geladen werden:\n{error}\n\nBitte einen anderen Ordner wählen.": "The data in\n{folder}\ncould not be loaded:\n{error}\n\nPlease choose another folder.",
     "Die Daten konnten nicht verschoben werden:\n{error}\n\nEs wurde nichts verändert.": "The data could not be moved:\n{error}\n\nNothing was changed.",
@@ -591,7 +595,7 @@ TRANSLATIONS = {
     "PDF konnte nicht gespeichert werden:\n{error}": "The PDF could not be saved:\n{error}",
     "PDF-Dateien (*.pdf)": "PDF files (*.pdf)",
     "Pink": "Pink",
-    "ProjectDesk-Dateien (*.pdesk)": "ProjectDesk files (*.pdesk)",
+    "Project-Desk-Dateien (*.pdesk)": "Project Desk files (*.pdesk)",
     "Projekt": "Project",
     "Projekt \"{name}\"": "Project \"{name}\"",
     "Projekt \"{name}\" löschen?": "Delete project \"{name}\"?",
@@ -752,7 +756,7 @@ class DialogIcon(QWidget):
 def create_message_dialog(parent: Optional[QWidget], kind: str, text: str) -> tuple[QDialog, QHBoxLayout]:
     # Text with icon on top, buttons in a gray bar below, like the message boxes of Windows
     dialog = QDialog(parent)
-    dialog.setWindowTitle(APP_NAME)
+    dialog.setWindowTitle(APP_TITLE)
     dialog.setObjectName("messageDialog")
     dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
@@ -1857,6 +1861,7 @@ class CardGeometry:
     subtitle_rect: QRectF
     meta_rect: QRectF
     actions: dict[str, QRectF]
+    condition_rect: QRectF
 
 
 class ItemDelegate(QStyledItemDelegate):
@@ -1932,7 +1937,15 @@ class ItemDelegate(QStyledItemDelegate):
         lead_size = px(CHECK_SIZE if item_type == ITEM_TODO else AVATAR_SIZE)
         left = rect.left() + px(CARD_PADDING_H)
         text_left = left + lead_size + px(CHECK_SPACING)
-        text_width = max(px(40), actions_left - px(6) - text_left)
+        content_right = actions_left - px(6)
+        text_width = max(px(40), content_right - text_left)
+
+        # Condition of a todo on the right of the first line, the title takes the rest
+        condition = (index.data(CONDITION_ROLE) or "") if item_type == ITEM_TODO else ""
+        condition_width = 0.0
+        if condition:
+            condition_width = min(metrics.horizontalAdvance(condition) + 1.0, max(px(60), (content_right - text_left) * CONDITION_MAX_SHARE))
+            text_width = max(px(40), content_right - condition_width - px(CONDITION_SPACING) - text_left)
 
         # Wrapped title
         title_font = QFont(font)
@@ -1982,6 +1995,7 @@ class ItemDelegate(QStyledItemDelegate):
 
         if meta_width > 0:
             meta_rect = QRectF(meta_left, text_top, meta_width, line_height)
+        condition_rect = QRectF(content_right - condition_width, text_top, condition_width, line_height) if condition_width > 0 else QRectF()
 
         return CardGeometry(
             card=QRectF(rect.left(), card_top, rect.width(), height - px(CARD_GAP)),
@@ -1992,6 +2006,7 @@ class ItemDelegate(QStyledItemDelegate):
             subtitle_rect=QRectF(text_left, text_top + title_height + px(SUBTITLE_SPACING), text_width, line_height),
             meta_rect=meta_rect,
             actions=actions,
+            condition_rect=condition_rect,
         )
 
     def header_band(self, rect: QRect, font: QFont) -> QRectF:
@@ -2119,18 +2134,25 @@ class ItemDelegate(QStyledItemDelegate):
 
         subtitle = index.data(SUBTITLE_ROLE) or ""
         if subtitle:
-            # Conditions of todos: red when overdue or due today, blue when the start is reached
-            state = index.data(STATE_ROLE) or ""
             metrics = QFontMetrics(option.font)
             painter.setFont(option.font)
+            painter.setPen(self.theme.muted)
+            elided = metrics.elidedText(subtitle, Qt.TextElideMode.ElideRight, round(geometry.subtitle_rect.width()))
+            painter.drawText(geometry.subtitle_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+
+        # Condition of todos: red when overdue or due today, blue when the start is reached
+        condition = index.data(CONDITION_ROLE) or ""
+        if item_type == ITEM_TODO and condition and geometry.condition_rect.isNull() is False:
+            state = index.data(STATE_ROLE) or ""
             if state in (CONDITION_OVERDUE, CONDITION_DUE):
                 painter.setPen(self.theme.flag)
             elif state == CONDITION_STARTED:
                 painter.setPen(self.theme.accent)
             else:
                 painter.setPen(self.theme.muted)
-            elided = metrics.elidedText(subtitle, Qt.TextElideMode.ElideRight, round(geometry.subtitle_rect.width()))
-            painter.drawText(geometry.subtitle_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+            painter.setFont(option.font)
+            elided = QFontMetrics(option.font).elidedText(condition, Qt.TextElideMode.ElideRight, round(geometry.condition_rect.width()))
+            painter.drawText(geometry.condition_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, elided)
 
         # Attachment count of todos
         count = index.data(COUNT_ROLE) or 0
@@ -4857,18 +4879,18 @@ class ImportPackage:
             values = json.loads(self._zip.read(EXPORT_CONTENT_NAME).decode("utf-8"))
         except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
             self.close()
-            raise PackageError(tr("Die Datei ist keine ProjectDesk-Datei oder beschädigt.")) from error
+            raise PackageError(tr("Die Datei ist keine Project-Desk-Datei oder beschädigt.")) from error
 
         if isinstance(values, dict) is False or values.get("format") != EXPORT_FORMAT:
             self.close()
-            raise PackageError(tr("Die Datei ist keine ProjectDesk-Datei oder beschädigt."))
+            raise PackageError(tr("Die Datei ist keine Project-Desk-Datei oder beschädigt."))
         try:
             format_version = int(values.get("format_version", 0))
         except (TypeError, ValueError):
             format_version = 0
         if format_version > EXPORT_FORMAT_VERSION:
             self.close()
-            raise PackageError(tr("Die Datei stammt aus einer neueren Version von ProjectDesk. Bitte ProjectDesk aktualisieren."))
+            raise PackageError(tr("Die Datei stammt aus einer neueren Version von Project Desk. Bitte Project Desk aktualisieren."))
 
         self.values = values
         self.kind = values.get("kind")
@@ -4877,7 +4899,7 @@ class ImportPackage:
         valid_project = self.kind == EXPORT_PROJECT and isinstance(values.get("project"), dict)
         if valid_items is False and valid_project is False:
             self.close()
-            raise PackageError(tr("Die Datei ist keine ProjectDesk-Datei oder beschädigt."))
+            raise PackageError(tr("Die Datei ist keine Project-Desk-Datei oder beschädigt."))
 
     def read_file(self, relative: str) -> Optional[bytes]:
         if self._zip is None:
@@ -4899,7 +4921,7 @@ def write_note_pdf(path: Path, title: str, subtitle: str, source: QTextDocument,
     writer.setPageMargins(QMarginsF(PDF_MARGIN_MM, PDF_MARGIN_MM, PDF_MARGIN_MM, PDF_MARGIN_MM), QPageLayout.Unit.Millimeter)
     writer.setResolution(PDF_RESOLUTION)
     writer.setTitle(title)
-    writer.setCreator(APP_NAME)
+    writer.setCreator(APP_TITLE)
 
     # Page area in device pixels, the footer with the page number is kept free
     paint_rect = writer.pageLayout().paintRectPixels(PDF_RESOLUTION)
@@ -5195,10 +5217,15 @@ class TodoPanel(ItemPanel):
         self._condition_button.setMenu(condition_menu)
         self._condition_menu = condition_menu
 
+        # Field and calendar keep their space while hidden, so the layout does not move
         self._condition_edit = create_field_edit(tr("Datum oder Text"))
         self._condition_edit.textEdited.connect(self._on_condition_edited)
         self._condition_edit.editingFinished.connect(self._show_condition)
         self._calendar_button = create_icon_button(tr("Datum auswählen"), self._show_calendar)
+        for widget in (self._condition_edit, self._calendar_button):
+            policy = widget.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            widget.setSizePolicy(policy)
 
         condition_row = QWidget()
         condition_layout = QHBoxLayout(condition_row)
@@ -5562,7 +5589,7 @@ class NotePanel(ItemPanel):
             return
         pixmap = QPixmap(str(self._storage.note_image_path(name)))
         if pixmap.isNull() is False:
-            ImageViewer(pixmap, self._item.title if self._item is not None else APP_NAME, self.window()).exec()
+            ImageViewer(pixmap, self._item.title if self._item is not None else APP_TITLE, self.window()).exec()
 
 
 def create_field_grid(rows: list[tuple[str, QWidget]]) -> QGridLayout:
@@ -5757,7 +5784,7 @@ class MainWindow(QMainWindow):
         self._update_checker.found.connect(self._on_update_found)
         QTimer.singleShot(UPDATE_CHECK_DELAY_MS, self._start_update_check)
 
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(APP_TITLE)
         self.setAcceptDrops(True)
         self.resize(1300, 800)
         self._build_ui()
@@ -6399,7 +6426,8 @@ class MainWindow(QMainWindow):
             row.setData(DONE_ROLE, item.done)
             row.setData(COUNT_ROLE, len(item.attachments))
             row.setData(FLAGGED_ROLE, item.flagged)
-            subtitle, state = todo_condition(item)
+            condition, state = todo_condition(item)
+            row.setData(CONDITION_ROLE, condition)
             row.setData(STATE_ROLE, state)
             flags |= Qt.ItemFlag.ItemIsUserCheckable
             if item.done is False:
@@ -7233,7 +7261,7 @@ class MainWindow(QMainWindow):
 
     def _write_export(self, name: str, values: dict) -> None:
         suggested = str(Path(self._exchange_folder()) / (safe_file_name(name) + EXPORT_EXTENSION))
-        file_name, _ = QFileDialog.getSaveFileName(self, tr("Exportieren"), suggested, tr("ProjectDesk-Dateien (*.pdesk)"))
+        file_name, _ = QFileDialog.getSaveFileName(self, tr("Exportieren"), suggested, tr("Project-Desk-Dateien (*.pdesk)"))
         if not file_name:
             return
         path = Path(file_name)
@@ -7257,7 +7285,7 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def _choose_import_file(self) -> None:
-        file_name, _ = QFileDialog.getOpenFileName(self, tr("Importieren"), self._exchange_folder(), tr("ProjectDesk-Dateien (*.pdesk)"))
+        file_name, _ = QFileDialog.getOpenFileName(self, tr("Importieren"), self._exchange_folder(), tr("Project-Desk-Dateien (*.pdesk)"))
         if file_name:
             self._settings.setValue("exchangeFolder", str(Path(file_name).parent))
             self.import_file(Path(file_name))
@@ -7340,7 +7368,7 @@ class MainWindow(QMainWindow):
         try:
             plan = self._plan_import(package)
         except LOAD_ERRORS:
-            show_message(self, tr("\"{name}\" kann nicht importiert werden:\n{error}", name=package.path.name, error=tr("Die Datei ist keine ProjectDesk-Datei oder beschädigt.")), DIALOG_WARNING)
+            show_message(self, tr("\"{name}\" kann nicht importiert werden:\n{error}", name=package.path.name, error=tr("Die Datei ist keine Project-Desk-Datei oder beschädigt.")), DIALOG_WARNING)
             return
 
         text = tr("Inhalt: {summary}", summary=plan["summary"]) + "\n" + plan["target_text"]

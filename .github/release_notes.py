@@ -13,8 +13,11 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 INSTALLATION = (
-    "Download ProjectDesk_Setup.exe and run it, no administrator rights are needed. "
-    "An installed version is updated and the data is kept. The user manual is attached as PDF."
+    "1. Download ProjectDesk_Setup.exe.\n"
+    "2. If Windows blocks the file, right-click it, choose **Properties**, select **Unblock** on the **General** tab and click **OK**.\n"
+    "3. Run the setup. No administrator rights are required. If SmartScreen shows a warning, click **More info** and then **Run anyway**.\n"
+    "\n"
+    "New versions install over the existing one. Data and settings are kept. The user manual is attached as PDF."
 )
 
 
