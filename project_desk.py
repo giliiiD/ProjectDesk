@@ -107,7 +107,7 @@ except ImportError:
 # Constants
 APP_NAME = "ProjectDesk"
 APP_TITLE = "Project Desk"
-APP_VERSION = "2.3.2"
+APP_VERSION = "2.3.3"
 UPDATE_API_URL = "https://api.github.com/repos/giliiiD/ProjectDesk/releases/latest"
 RELEASES_URL = "https://github.com/giliiiD/ProjectDesk/releases/latest"
 UPDATE_CHECK_DELAY_MS = 3000
@@ -236,8 +236,9 @@ CONDITION_OVERDUE = "overdue"
 CONDITION_DUE = "due"
 CONDITION_STARTED = "started"
 CONDITION_NEXT_YEAR_DAYS = 183
-CONDITION_SPACING = 12.0
-CONDITION_MAX_SHARE = 0.45
+CONDITION_FONT_SCALE = 0.85
+CONDITION_LINE_SPACING = 1.0
+CONDITION_MIN_PADDING = 3.0
 DAY_CHECK_MS = 60000
 TOOLBAR_SEPARATOR_HEIGHT = 16
 TABULAR_FIGURES_FEATURE = "tnum"
@@ -1940,13 +1941,6 @@ class ItemDelegate(QStyledItemDelegate):
         content_right = actions_left - px(6)
         text_width = max(px(40), content_right - text_left)
 
-        # Condition of a todo on the right of the first line, the title takes the rest
-        condition = (index.data(CONDITION_ROLE) or "") if item_type == ITEM_TODO else ""
-        condition_width = 0.0
-        if condition:
-            condition_width = min(metrics.horizontalAdvance(condition) + 1.0, max(px(60), (content_right - text_left) * CONDITION_MAX_SHARE))
-            text_width = max(px(40), content_right - condition_width - px(CONDITION_SPACING) - text_left)
-
         # Wrapped title
         title_font = QFont(font)
         title_font.setStrikeOut(done)
@@ -1966,40 +1960,57 @@ class ItemDelegate(QStyledItemDelegate):
         layout.endLayout()
         title_height = max(title_height, line_height)
 
+        # Condition of a todo as a smaller second line below the title
+        condition = (index.data(CONDITION_ROLE) or "") if item_type == ITEM_TODO else ""
+        condition_height = QFontMetricsF(scaled_font(font, CONDITION_FONT_SCALE)).height() if condition else 0.0
+
         subtitle = index.data(SUBTITLE_ROLE) or ""
         subtitle_height = px(SUBTITLE_SPACING) + line_height if subtitle else 0.0
         text_height = title_height + subtitle_height
+        if condition:
+            text_height += px(CONDITION_LINE_SPACING) + condition_height
 
         # Notes and links are centered vertically, todos start at the first line
-        if item_type != ITEM_TODO:
-            content_height = max(text_height, lead_size)
-            lead_offset = (content_height - lead_size) / 2
-            text_offset = (content_height - text_height) / 2
-        else:
-            lead_offset = max(0.0, (line_height - lead_size) / 2)
-            text_offset = max(0.0, (lead_size - line_height) / 2)
-            content_height = max(text_offset + text_height, lead_offset + lead_size)
-
-        height = math.ceil(content_height + px(CARD_PADDING_V) * 2 + px(CARD_GAP))
         card_top = rect.top() + px(CARD_GAP) / 2
-        content_top = card_top + px(CARD_PADDING_V)
-        text_top = content_top + text_offset
-        if item_type != ITEM_TODO:
-            action_center = content_top + content_height / 2
+        compact = bool(condition) and layout.lineCount() <= 1
+        if compact:
+            # A one line title with condition keeps the height of a one line todo, checkbox and icons are centered
+            inner_height = max(max(line_height, lead_size) + px(CARD_PADDING_V) * 2, text_height + px(CONDITION_MIN_PADDING) * 2)
+            height = math.ceil(inner_height + px(CARD_GAP))
+            text_top = card_top + (inner_height - text_height) / 2
+            lead_top = card_top + (inner_height - lead_size) / 2
+            action_center = card_top + inner_height / 2
+            meta_top = action_center - line_height / 2
         else:
-            action_center = text_top + line_height / 2
+            if item_type != ITEM_TODO:
+                content_height = max(text_height, lead_size)
+                lead_offset = (content_height - lead_size) / 2
+                text_offset = (content_height - text_height) / 2
+            else:
+                lead_offset = max(0.0, (line_height - lead_size) / 2)
+                text_offset = max(0.0, (lead_size - line_height) / 2)
+                content_height = max(text_offset + text_height, lead_offset + lead_size)
+            height = math.ceil(content_height + px(CARD_PADDING_V) * 2 + px(CARD_GAP))
+            content_top = card_top + px(CARD_PADDING_V)
+            text_top = content_top + text_offset
+            lead_top = content_top + lead_offset
+            if item_type != ITEM_TODO:
+                action_center = content_top + content_height / 2
+            else:
+                action_center = text_top + line_height / 2
+            meta_top = text_top
 
         actions = {}
         for name, action_left in action_lefts.items():
             actions[name] = QRectF(action_left, action_center - action_size / 2, action_size, action_size)
 
         if meta_width > 0:
-            meta_rect = QRectF(meta_left, text_top, meta_width, line_height)
-        condition_rect = QRectF(content_right - condition_width, text_top, condition_width, line_height) if condition_width > 0 else QRectF()
+            meta_rect = QRectF(meta_left, meta_top, meta_width, line_height)
+        condition_rect = QRectF(text_left, text_top + title_height + px(CONDITION_LINE_SPACING), text_width, condition_height) if condition else QRectF()
 
         return CardGeometry(
             card=QRectF(rect.left(), card_top, rect.width(), height - px(CARD_GAP)),
-            lead=QRectF(left, content_top + lead_offset, lead_size, lead_size),
+            lead=QRectF(left, lead_top, lead_size, lead_size),
             text_origin=QPointF(text_left, text_top),
             layout=layout,
             title_rect=QRectF(text_left, text_top, text_width, title_height),
@@ -2123,11 +2134,9 @@ class ItemDelegate(QStyledItemDelegate):
 
         self._paint_lead(painter, geometry.lead, item_type, done, selected, index)
 
-        # Title and subtitle
+        # Title and subtitle, flagged todos are marked by flag and background only
         if done:
             painter.setPen(self.theme.muted)
-        elif flagged:
-            painter.setPen(self.theme.flag)
         else:
             painter.setPen(self.theme.text)
         geometry.layout.draw(painter, geometry.text_origin)
@@ -2145,14 +2154,16 @@ class ItemDelegate(QStyledItemDelegate):
         if item_type == ITEM_TODO and condition and geometry.condition_rect.isNull() is False:
             state = index.data(STATE_ROLE) or ""
             if state in (CONDITION_OVERDUE, CONDITION_DUE):
-                painter.setPen(self.theme.flag)
+                color = self.theme.flag
             elif state == CONDITION_STARTED:
-                painter.setPen(self.theme.accent)
+                color = self.theme.accent
             else:
-                painter.setPen(self.theme.muted)
-            painter.setFont(option.font)
-            elided = QFontMetrics(option.font).elidedText(condition, Qt.TextElideMode.ElideRight, round(geometry.condition_rect.width()))
-            painter.drawText(geometry.condition_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, elided)
+                color = self.theme.muted
+            condition_font = scaled_font(option.font, CONDITION_FONT_SCALE)
+            painter.setFont(condition_font)
+            painter.setPen(color)
+            elided = QFontMetrics(condition_font).elidedText(condition, Qt.TextElideMode.ElideRight, round(geometry.condition_rect.width()))
+            painter.drawText(geometry.condition_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
 
         # Attachment count of todos
         count = index.data(COUNT_ROLE) or 0
@@ -3206,6 +3217,15 @@ def tabular_figures(font: QFont) -> QFont:
 def highlight_color() -> QColor:
     dark = QApplication.palette().color(QPalette.ColorRole.Base).lightness() < 128
     return QColor(HIGHLIGHT_DARK if dark else HIGHLIGHT_LIGHT)
+
+
+def scaled_font(font: QFont, factor: float) -> QFont:
+    scaled = QFont(font)
+    if font.pointSizeF() > 0:
+        scaled.setPointSizeF(font.pointSizeF() * factor)
+    elif font.pixelSize() > 0:
+        scaled.setPixelSize(max(1, round(font.pixelSize() * factor)))
+    return scaled
 
 
 def is_bullet_list(text_list) -> bool:

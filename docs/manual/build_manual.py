@@ -200,7 +200,7 @@ def write_chapters(manual: Manual) -> None:
 <h3>Condition</h3>
 <p>A todo can have a condition: {ui("Until")} for a deadline or {ui("From")} for the earliest start. Choose the kind next to {ui("Condition")} and enter a date such as 14.11. or 2026-11-14, or a text such as "design approval". The calendar icon selects a date, {ui("None")} removes the condition.</p>
 {manual.figure("condition.png", "Selecting a deadline in the calendar", size=62)}
-<p>The condition appears to the right of the todo title. A deadline that is today or past is red, a start date that has been reached is blue.</p>
+<p>The condition appears in small text below the todo title. A deadline that is today or past is red, a start date that has been reached is blue.</p>
 <h3>Description</h3>
 <p>Descriptions, notes and link notes share this toolbar:</p>
 {manual.figure("toolbar.png", "Toolbar for formatting text", size=45)}

@@ -224,7 +224,8 @@ Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\T
 - In the right column (`TodoPanel`) the row "Condition" has a button for the kind (None, Until, From), a field for a date or a text and a calendar icon. With "None" the field and the calendar are hidden but keep their space, so the layout does not move. Choosing "None" clears date and text
 - `parse_condition_date` accepts `14.11.2026`, `14.11.26`, `14.11.`, `14.11` and `2026-11-14`. Anything else is stored as text. A date without a year that lies more than half a year in the past (`CONDITION_NEXT_YEAR_DAYS`) refers to the next year. When the field loses focus, a date is shown in the date format of the language
 - The calendar (`TodoPanel._show_calendar`) opens below its icon in the colors of the app. A click selects the day
-- In the list the condition appears on the right of the first line, left of the flag and the attachment count (`todo_condition`, `CONDITION_ROLE`), for example "Until 14.11.2026" or "From design approval". The card keeps its height. Long texts are shortened with an ellipsis and take at most `CONDITION_MAX_SHARE` of the width. Today, tomorrow and yesterday are shown as words
+- In the list the condition is a smaller, lighter second line below the title (`todo_condition`, `CONDITION_ROLE`, `CONDITION_FONT_SCALE`), for example "Until 14.11.2026" or "From design approval". Today, tomorrow and yesterday are shown as words, long texts are shortened with an ellipsis
+- With a one-line title the card keeps the height of a todo without condition: the vertical padding shrinks down to `CONDITION_MIN_PADDING`, and checkbox, flag and attachment count are centered vertically. Only titles with several lines make the card taller
 - Colors (`STATE_ROLE`): red when an "Until" date is today or past, blue when a "From" date is reached, otherwise gray. Done todos and text conditions are always gray. There is no additional text such as "overdue"
 - `MainWindow._check_day` checks every minute (`DAY_CHECK_MS`) whether the date has changed and updates the cards, also after the computer was asleep
 - Choosing the kind and choosing a day in the calendar are separate undo steps (`ItemPanel.step_started`). Typing in the field is one step per entry
@@ -428,7 +429,7 @@ Middle list:
 Colors:
 - Projects: hover light blue, selected gray, no accent bar
 - Cards: hover light blue with a blue accent bar on the left, selected darker blue, also for every entry of a multi selection
-- Flagged todos: yellow background and red title, darker yellow when selected
+- Flagged todos: yellow background and the red flag, the title keeps the text color. Darker yellow when selected
 - The icons on the right of todo cards align to the right edge: the attachment count at the edge, the flag to its left, or the flag at the edge without attachments. No space is reserved for hidden icons
 
 Text editing:
@@ -520,6 +521,10 @@ Check on Windows after related changes, since offscreen mode cannot show them:
 - The installer is not signed
 
 ## Version History
+
+### 2.3.3
+- The condition appears as a smaller second line below the todo title, todos with and without condition have the same height
+- Flagged todos keep the normal title color, the flag and the yellow background mark them
 
 ### 2.3.2
 - Every project remembers its last open tab, also after a restart

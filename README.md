@@ -24,5 +24,5 @@ Releases are built and published by the GitHub workflow **Release**. For a local
 
 ---
 
-Version 2.3.2  
+Version 2.3.3  
 Daniel Gilinberg
