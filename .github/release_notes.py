@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-INTRO = (
+INSTALLATION = (
     "Download ProjectDesk_Setup.exe and run it, no administrator rights are needed. "
     "An installed version is updated and the data is kept. The user manual is attached as PDF."
 )
@@ -38,7 +38,9 @@ def main() -> int:
         print(f"The version history in DEVELOPMENT.md has no section ### {version}", file=sys.stderr)
         return 1
 
-    notes_file.write_text(INTRO + "\n\n" + section.group(1).strip() + "\n", encoding="utf-8")
+    # Changes first, then how to install
+    notes = "### What's new\n\n" + section.group(1).strip() + "\n\n### Installation\n\n" + INSTALLATION + "\n"
+    notes_file.write_text(notes, encoding="utf-8")
     print(version)
     return 0
 
