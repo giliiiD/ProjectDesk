@@ -26,6 +26,7 @@ OUTPUT = REPOSITORY / "docs" / "ProjectDesk_User_Manual.pdf"
 ICON = REPOSITORY / "projectdesk.ico"
 EDITION = "November 2026"
 ACCENT = "#0f6cbd"
+OVERVIEW_CROPS = ("todo_details", "todo_cards", "steps")
 
 CSS = """
 @page { size: A4; }
@@ -100,7 +101,7 @@ class Manual:
         key = name.removesuffix(".png")
         if key not in self.crops:
             return BUILD / name
-        source = BUILD / ("overview.png" if key == "todo_details" else name)
+        source = BUILD / ("overview.png" if key in OVERVIEW_CROPS else name)
         image = Image.open(source)
         scale = image.width / self.window_width
         x, y, width, height = self.crops[key]
@@ -190,17 +191,28 @@ def write_chapters(manual: Manual) -> None:
 """)
 
     manual.chapter("Todos", f"""
-{manual.figure("todo_details.png", "Details of a todo with condition, description and attachment", side=True)}
+{manual.figure("todo_details.png", "Details of a todo with condition, steps, description and attachment", side=True)}
 <ul>
 <li>{ui("Add")}: type into {ui("Add new todo")} and press <kbd>Enter</kbd>.</li>
 <li>{ui("Done")}: click the checkbox. The todo moves to {ui("Done")} at the end of the list and loses its flag. Clicking the checkbox again reopens it.</li>
-<li>{ui("Flag")}: right-click an open todo and choose {ui("Flag")}. Flagged todos have a yellow background, and the project shows a red flag. A click on the flag removes it.</li>
+<li>{ui("Flag")}: right-click an open todo and choose {ui("Flag")}. Flagged todos have a yellow background and a red flag at the right edge, and the project shows a red flag. {ui("Remove flag")} in the right-click menu removes it.</li>
 <li>{ui("Rename")}: double-click the todo in the list or edit the title on the right.</li>
 </ul>
+<h3>In the list</h3>
+<p>Long titles are shortened in the list. Point at a todo to see the full title. Below the title, a todo shows what it contains: the condition, the progress of its steps, the number of attachments and an icon when it has a description.</p>
+{manual.figure("todo_cards.png", "Todos with condition, steps, attachment and description", size=72)}
 <h3>Condition</h3>
 <p>A todo can have a condition: {ui("Until")} for a deadline or {ui("From")} for the earliest start. Choose the kind next to {ui("Condition")} and enter a date such as 14.11. or 2026-11-14, or a text such as "design approval". The calendar icon selects a date, {ui("None")} removes the condition.</p>
 {manual.figure("condition.png", "Selecting a deadline in the calendar", size=62)}
-<p>The condition appears in small text below the todo title. A deadline that is today or past is red, a start date that has been reached is blue.</p>
+<p>In the list a calendar icon stands before a date and a diamond before a text. A deadline that is today or past is red, a start date that has been reached is blue.</p>
+<h3>Steps</h3>
+<p>Steps break a todo into smaller tasks. Type a step into {ui("Add step")} and press <kbd>Enter</kbd>, the field stays ready for the next one. Click the checkbox of a step when it is done. The todo itself is checked separately.</p>
+{manual.figure("steps.png", "Steps of a todo", size=62)}
+<ul>
+<li>{ui("Rename")}: double-click the step.</li>
+<li>{ui("Order")}: drag the step up or down.</li>
+<li>{ui("Delete")}: right-click the step and choose {ui("Delete")}. {keys("Ctrl", "Z")} brings it back.</li>
+</ul>
 <h3>Description</h3>
 <p>Descriptions, notes and link notes share this toolbar:</p>
 {manual.figure("toolbar.png", "Toolbar for formatting text", size=45)}

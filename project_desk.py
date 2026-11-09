@@ -107,7 +107,7 @@ except ImportError:
 # Constants
 APP_NAME = "ProjectDesk"
 APP_TITLE = "Project Desk"
-APP_VERSION = "2.3.3"
+APP_VERSION = "2.4.0"
 UPDATE_API_URL = "https://api.github.com/repos/giliiiD/ProjectDesk/releases/latest"
 RELEASES_URL = "https://github.com/giliiiD/ProjectDesk/releases/latest"
 UPDATE_CHECK_DELAY_MS = 3000
@@ -198,6 +198,9 @@ DONE_ROLE = Qt.ItemDataRole.UserRole + 14
 COLOR_ROLE = Qt.ItemDataRole.UserRole + 15
 STATE_ROLE = Qt.ItemDataRole.UserRole + 16
 CONDITION_ROLE = Qt.ItemDataRole.UserRole + 17
+STEPS_ROLE = Qt.ItemDataRole.UserRole + 18
+CONDITION_KIND_ROLE = Qt.ItemDataRole.UserRole + 19
+DESCRIPTION_ROLE = Qt.ItemDataRole.UserRole + 20
 
 KIND_PROJECT = "project"
 KIND_ARCHIVE_HEADER = "archive_header"
@@ -236,9 +239,18 @@ CONDITION_OVERDUE = "overdue"
 CONDITION_DUE = "due"
 CONDITION_STARTED = "started"
 CONDITION_NEXT_YEAR_DAYS = 183
-CONDITION_FONT_SCALE = 0.85
-CONDITION_LINE_SPACING = 1.0
-CONDITION_MIN_PADDING = 3.0
+TODO_PADDING_V = 7.0
+DETAIL_FONT_SCALE = 0.85
+DETAIL_LINE_SPACING = 1.0
+DETAIL_ICON_SIZE = 13
+DETAIL_SPACING = 12.0
+STEP_PADDING_H = 12
+STEP_PADDING_V = 7
+STEP_CHECK_SIZE = 16.0
+STEP_TEXT_SPACING = 10
+STEP_MAX_ROWS = 8
+TODO_DESCRIPTION_MIN_HEIGHT = 80
+TODO_DESCRIPTION_MAX_HEIGHT = 300
 DAY_CHECK_MS = 60000
 TOOLBAR_SEPARATOR_HEIGHT = 16
 TABULAR_FIGURES_FEATURE = "tnum"
@@ -440,6 +452,8 @@ TRANSLATIONS = {
     "Bis": "Until",
     "Datum auswählen": "Choose date",
     "Datum oder Text": "Date or text",
+    "Schritt hinzufügen": "Add step",
+    "Schritte": "Steps",
     "Keine": "None",
     "gestern": "yesterday",
     "heute": "today",
@@ -984,6 +998,10 @@ QFrame#tabRow {{ background: transparent; border: none; border-bottom: 1px solid
 QToolButton#tabButton {{ background: transparent; color: {self.muted.name()}; border: none; border-bottom: 2px solid transparent; border-radius: 0px; padding: 0px; }}
 QToolButton#tabButton:hover {{ background: transparent; color: {self.text.name()}; }}
 QToolButton#tabButton:checked {{ background: transparent; color: {self.text.name()}; border-bottom: 2px solid {self.accent.name()}; font-weight: 600; }}
+QFrame#stepFrame {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; }}
+QListWidget#stepList {{ background: transparent; border: none; outline: 0; }}
+QFrame#stepDivider {{ background: {self.divider.name()}; border: none; }}
+QLineEdit#stepAddEdit {{ background: transparent; border: none; padding: 0px; }}
 QFrame#descriptionFrame {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; }}
 QFrame#toolbarLine {{ background: {self.divider.name()}; border: none; }}
 QFrame#toolbarSeparator {{ background: {self.divider_strong.name()}; border: none; margin: 0px 3px; }}
@@ -1101,6 +1119,21 @@ def optional_id(value) -> Optional[str]:
 
 
 @dataclass
+class Step:
+    id: str
+    title: str
+    done: bool = False
+
+    @staticmethod
+    def create(title: str) -> Step:
+        return Step(id=new_id(), title=title)
+
+    @staticmethod
+    def from_dict(values: dict) -> Step:
+        return Step(id=str(values.get("id") or new_id()), title=" ".join(str(values.get("title", "")).split()), done=bool(values.get("done", False)))
+
+
+@dataclass
 class Todo:
     id: str
     title: str
@@ -1116,6 +1149,7 @@ class Todo:
     condition: str = ""
     condition_date: str = ""
     condition_text: str = ""
+    steps: list[Step] = field(default_factory=list)
 
     @staticmethod
     def create(title: str, group_id: Optional[str] = None) -> Todo:
@@ -1125,6 +1159,18 @@ class Todo:
     @staticmethod
     def from_dict(values: dict) -> Todo:
         done_at = values.get("done_at")
+        # Steps with unique ids
+        steps: list[Step] = []
+        step_ids: set[str] = set()
+        step_values = values.get("steps")
+        for entry in step_values if isinstance(step_values, list) else []:
+            if isinstance(entry, dict) is False:
+                continue
+            step = Step.from_dict(entry)
+            if step.id in step_ids:
+                step.id = new_id()
+            step_ids.add(step.id)
+            steps.append(step)
         condition = str(values.get("condition", ""))
         condition_date = str(values.get("condition_date", "") or "")
         return Todo(
@@ -1142,6 +1188,7 @@ class Todo:
             condition=condition if condition in (CONDITION_UNTIL, CONDITION_FROM) else "",
             condition_date=condition_date if iso_date(condition_date) is not None else "",
             condition_text=str(values.get("condition_text", "")),
+            steps=steps,
         )
 
 
@@ -1747,6 +1794,27 @@ def paint_action(painter: QPainter, rect: QRectF, icon: QIcon, active: bool, the
     icon.paint(painter, rect.adjusted(inset, inset, -inset, -inset).toRect())
 
 
+def paint_check(painter: QPainter, rect: QRectF, done: bool, radius: float, theme: Theme) -> None:
+    # Rounded checkbox, filled with a check mark when done
+    if done:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(theme.muted)
+        painter.drawRoundedRect(rect, radius, radius)
+        check_pen = QPen(theme.base, px(2))
+        check_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        check_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(check_pen)
+        painter.drawPolyline([
+            QPointF(rect.left() + rect.width() * 0.24, rect.top() + rect.height() * 0.52),
+            QPointF(rect.left() + rect.width() * 0.43, rect.top() + rect.height() * 0.70),
+            QPointF(rect.left() + rect.width() * 0.77, rect.top() + rect.height() * 0.32),
+        ])
+    else:
+        painter.setPen(QPen(theme.muted, px(1.5)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, radius, radius)
+
+
 def create_inline_editor(parent: QWidget) -> QLineEdit:
     editor = QLineEdit(parent)
     editor.setObjectName("inlineEdit")
@@ -1860,9 +1928,10 @@ class CardGeometry:
     layout: QTextLayout
     title_rect: QRectF
     subtitle_rect: QRectF
-    meta_rect: QRectF
+    detail_rect: QRectF
+    flag_rect: QRectF
     actions: dict[str, QRectF]
-    condition_rect: QRectF
+    title_elided: bool
 
 
 class ItemDelegate(QStyledItemDelegate):
@@ -1881,13 +1950,17 @@ class ItemDelegate(QStyledItemDelegate):
     def theme(self, value: Theme) -> None:
         self._theme = value
         factories = {
-            "flag": create_flag_icon,
             "open": create_open_icon,
             "add": create_add_icon,
         }
         self._icons = {name: (factory(value.muted), factory(value.text)) for name, factory in factories.items()}
         self._flag_icon_set = create_flag_icon(value.flag, True)
         self._attachment_icon = create_attachment_icon(value.muted)
+        self._steps_icon = create_task_icon(value.muted)
+        self._description_icon = create_description_icon(value.muted)
+        self._condition_icons = {}
+        for state, color in (("", value.muted), (CONDITION_OVERDUE, value.flag), (CONDITION_DUE, value.flag), (CONDITION_STARTED, value.accent)):
+            self._condition_icons[state] = (create_calendar_icon(color), create_milestone_icon(color))
         lead_color = value.text if value.is_dark else value.accent
         self._note_icon = create_note_icon(lead_color)
         self._link_icon = create_link_icon(lead_color)
@@ -1895,16 +1968,12 @@ class ItemDelegate(QStyledItemDelegate):
     # Geometry
     @staticmethod
     def action_names(item_type: str) -> list[str]:
-        if item_type == ITEM_TODO:
-            return ["flag"]
         if item_type == ITEM_LINK:
             return ["open"]
         return []
 
     @staticmethod
     def action_visible(name: str, index) -> bool:
-        if name == "flag":
-            return bool(index.data(FLAGGED_ROLE))
         return bool(index.data(TARGET_ROLE))
 
     def card_geometry(self, rect: QRect, font: QFont, index) -> CardGeometry:
@@ -1914,18 +1983,14 @@ class ItemDelegate(QStyledItemDelegate):
         line_height = metrics.height()
         action_size = px(ACTION_SIZE)
 
-        # Icons on the right, the rightmost shown icon sits at the edge
+        # Flag of a todo and actions on the right, the rightmost one sits at the edge
         right = rect.left() + rect.width() - px(CARD_PADDING_H)
-        meta_rect = QRectF()
-        meta_left = right
-        meta_width = 0.0
         slot_right = right + px(4)
-        count = index.data(COUNT_ROLE) or 0
-        if item_type == ITEM_TODO and count:
-            meta_width = px(ICON_SIZE) + px(META_ICON_SPACING) + metrics.horizontalAdvance(str(count))
-            meta_left = right - meta_width
-            slot_right = meta_left - px(META_SPACING) + px(4)
-
+        flag_left = 0.0
+        flagged = item_type == ITEM_TODO and bool(index.data(FLAGGED_ROLE))
+        if flagged:
+            flag_left = slot_right - action_size
+            slot_right -= action_size + px(2)
         action_lefts: dict[str, float] = {}
         for name in self.action_names(item_type):
             if self.action_visible(name, index) is False:
@@ -1941,88 +2006,69 @@ class ItemDelegate(QStyledItemDelegate):
         content_right = actions_left - px(6)
         text_width = max(px(40), content_right - text_left)
 
-        # Wrapped title
+        # Title in one line, shortened with an ellipsis when it does not fit
         title_font = QFont(font)
         title_font.setStrikeOut(done)
-        layout = QTextLayout((index.data(Qt.ItemDataRole.DisplayRole) or "").replace("\n", " "), title_font)
+        title = (index.data(Qt.ItemDataRole.DisplayRole) or "").replace("\n", " ")
+        elided_title = QFontMetricsF(title_font).elidedText(title, Qt.TextElideMode.ElideRight, text_width)
+        layout = QTextLayout(elided_title, title_font)
         text_option = QTextOption()
-        text_option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        text_option.setWrapMode(QTextOption.WrapMode.NoWrap)
         layout.setTextOption(text_option)
         layout.beginLayout()
-        title_height = 0.0
-        while True:
-            line = layout.createLine()
-            if line.isValid() is False:
-                break
-            line.setLineWidth(text_width)
-            line.setPosition(QPointF(0.0, title_height))
-            title_height += line.height()
+        line = layout.createLine()
+        line.setLineWidth(text_width)
+        line.setPosition(QPointF(0.0, 0.0))
         layout.endLayout()
-        title_height = max(title_height, line_height)
+        title_height = max(line.height(), line_height)
 
-        # Condition of a todo as a smaller second line below the title
-        condition = (index.data(CONDITION_ROLE) or "") if item_type == ITEM_TODO else ""
-        condition_height = QFontMetricsF(scaled_font(font, CONDITION_FONT_SCALE)).height() if condition else 0.0
-
-        subtitle = index.data(SUBTITLE_ROLE) or ""
-        subtitle_height = px(SUBTITLE_SPACING) + line_height if subtitle else 0.0
-        text_height = title_height + subtitle_height
-        if condition:
-            text_height += px(CONDITION_LINE_SPACING) + condition_height
-
-        # Notes and links are centered vertically, todos start at the first line
         card_top = rect.top() + px(CARD_GAP) / 2
-        compact = bool(condition) and layout.lineCount() <= 1
-        if compact:
-            # A one line title with condition keeps the height of a one line todo, checkbox and icons are centered
-            inner_height = max(max(line_height, lead_size) + px(CARD_PADDING_V) * 2, text_height + px(CONDITION_MIN_PADDING) * 2)
-            height = math.ceil(inner_height + px(CARD_GAP))
+        detail_rect = QRectF()
+        subtitle_rect = QRectF()
+        if item_type == ITEM_TODO:
+            # Todos have the same height with and without second line, checkbox and flag are centered
+            detail_height = QFontMetricsF(scaled_font(font, DETAIL_FONT_SCALE)).height()
+            inner_height = max(lead_size, title_height + px(DETAIL_LINE_SPACING) + detail_height) + px(TODO_PADDING_V) * 2
+            text_height = title_height
+            if has_detail_line(index):
+                text_height += px(DETAIL_LINE_SPACING) + detail_height
             text_top = card_top + (inner_height - text_height) / 2
-            lead_top = card_top + (inner_height - lead_size) / 2
-            action_center = card_top + inner_height / 2
-            meta_top = action_center - line_height / 2
+            if has_detail_line(index):
+                detail_rect = QRectF(text_left, text_top + title_height + px(DETAIL_LINE_SPACING), text_width, detail_height)
         else:
-            if item_type != ITEM_TODO:
-                content_height = max(text_height, lead_size)
-                lead_offset = (content_height - lead_size) / 2
-                text_offset = (content_height - text_height) / 2
-            else:
-                lead_offset = max(0.0, (line_height - lead_size) / 2)
-                text_offset = max(0.0, (lead_size - line_height) / 2)
-                content_height = max(text_offset + text_height, lead_offset + lead_size)
-            height = math.ceil(content_height + px(CARD_PADDING_V) * 2 + px(CARD_GAP))
-            content_top = card_top + px(CARD_PADDING_V)
-            text_top = content_top + text_offset
-            lead_top = content_top + lead_offset
-            if item_type != ITEM_TODO:
-                action_center = content_top + content_height / 2
-            else:
-                action_center = text_top + line_height / 2
-            meta_top = text_top
+            # Notes and links: title and subtitle centered vertically
+            subtitle = index.data(SUBTITLE_ROLE) or ""
+            text_height = title_height + (px(SUBTITLE_SPACING) + line_height if subtitle else 0.0)
+            inner_height = max(text_height, lead_size) + px(CARD_PADDING_V) * 2
+            text_top = card_top + (inner_height - text_height) / 2
+            if subtitle:
+                subtitle_rect = QRectF(text_left, text_top + title_height + px(SUBTITLE_SPACING), text_width, line_height)
+        lead_top = card_top + (inner_height - lead_size) / 2
+        action_center = card_top + inner_height / 2
 
         actions = {}
         for name, action_left in action_lefts.items():
             actions[name] = QRectF(action_left, action_center - action_size / 2, action_size, action_size)
-
-        if meta_width > 0:
-            meta_rect = QRectF(meta_left, meta_top, meta_width, line_height)
-        condition_rect = QRectF(text_left, text_top + title_height + px(CONDITION_LINE_SPACING), text_width, condition_height) if condition else QRectF()
+        flag_rect = QRectF(flag_left, action_center - action_size / 2, action_size, action_size) if flagged else QRectF()
 
         return CardGeometry(
-            card=QRectF(rect.left(), card_top, rect.width(), height - px(CARD_GAP)),
+            card=QRectF(rect.left(), card_top, rect.width(), inner_height),
             lead=QRectF(left, lead_top, lead_size, lead_size),
             text_origin=QPointF(text_left, text_top),
             layout=layout,
             title_rect=QRectF(text_left, text_top, text_width, title_height),
-            subtitle_rect=QRectF(text_left, text_top + title_height + px(SUBTITLE_SPACING), text_width, line_height),
-            meta_rect=meta_rect,
+            subtitle_rect=subtitle_rect,
+            detail_rect=detail_rect,
+            flag_rect=flag_rect,
             actions=actions,
-            condition_rect=condition_rect,
+            title_elided=elided_title != title,
         )
 
     def header_band(self, rect: QRect, font: QFont) -> QRectF:
+        # Measured from the bottom of the row, the first row of the list has less space above
         line_height = QFontMetricsF(font).height()
-        return QRectF(rect.left(), rect.top() + px(SECTION_TOP) - px(SECTION_BAND_PADDING), rect.width(), line_height + px(SECTION_BAND_PADDING) * 2)
+        text_top = rect.top() + rect.height() - px(SECTION_BOTTOM) - line_height
+        return QRectF(rect.left(), text_top - px(SECTION_BAND_PADDING), rect.width(), line_height + px(SECTION_BAND_PADDING) * 2)
 
     def _header_count_rect(self, band: QRectF, font: QFont) -> QRectF:
         width = QFontMetricsF(font).horizontalAdvance(COUNT_SLOT_TEXT)
@@ -2044,7 +2090,8 @@ class ItemDelegate(QStyledItemDelegate):
             return QSize(width, ipx(LIST_END_SPACE))
         if index.data(KIND_ROLE) in (KIND_SECTION, KIND_DONE):
             metrics = QFontMetrics(option.font)
-            return QSize(width, metrics.height() + ipx(SECTION_TOP) + ipx(SECTION_BOTTOM))
+            top = ipx(SECTION_BAND_PADDING) if index.row() == 0 else ipx(SECTION_TOP)
+            return QSize(width, metrics.height() + top + ipx(SECTION_BOTTOM))
 
         geometry = self.card_geometry(QRect(0, 0, width, 0), option.font, index)
         return QSize(width, math.ceil(geometry.card.bottom() + px(CARD_GAP) / 2))
@@ -2149,33 +2196,13 @@ class ItemDelegate(QStyledItemDelegate):
             elided = metrics.elidedText(subtitle, Qt.TextElideMode.ElideRight, round(geometry.subtitle_rect.width()))
             painter.drawText(geometry.subtitle_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
 
-        # Condition of todos: red when overdue or due today, blue when the start is reached
-        condition = index.data(CONDITION_ROLE) or ""
-        if item_type == ITEM_TODO and condition and geometry.condition_rect.isNull() is False:
-            state = index.data(STATE_ROLE) or ""
-            if state in (CONDITION_OVERDUE, CONDITION_DUE):
-                color = self.theme.flag
-            elif state == CONDITION_STARTED:
-                color = self.theme.accent
-            else:
-                color = self.theme.muted
-            condition_font = scaled_font(option.font, CONDITION_FONT_SCALE)
-            painter.setFont(condition_font)
-            painter.setPen(color)
-            elided = QFontMetrics(condition_font).elidedText(condition, Qt.TextElideMode.ElideRight, round(geometry.condition_rect.width()))
-            painter.drawText(geometry.condition_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+        # Second line of todos: condition, red when overdue or due today, blue when the start is reached, then steps and attachments
+        if item_type == ITEM_TODO and geometry.detail_rect.isNull() is False:
+            self._paint_detail_line(painter, geometry.detail_rect, option.font, index)
 
-        # Attachment count of todos
-        count = index.data(COUNT_ROLE) or 0
-        if item_type == ITEM_TODO and count:
-            meta_rect = geometry.meta_rect
-            icon_size = ipx(ICON_SIZE)
-            icon_top = round(meta_rect.top() + (meta_rect.height() - icon_size) / 2)
-            self._attachment_icon.paint(painter, QRect(round(meta_rect.left()), icon_top, icon_size, icon_size))
-            painter.setFont(option.font)
-            painter.setPen(self.theme.muted)
-            text_rect = meta_rect.adjusted(icon_size + px(META_ICON_SPACING), 0, 0, 0)
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, str(count))
+        # Flag of todos, it only marks the todo and is set in the right click menu
+        if geometry.flag_rect.isNull() is False:
+            paint_action(painter, geometry.flag_rect, self._flag_icon_set, False, self.theme)
 
         # Actions in fixed places
         hover_pos = self._view.hover_pos if hovered else None
@@ -2183,35 +2210,68 @@ class ItemDelegate(QStyledItemDelegate):
             if self.action_visible(name, index) is False:
                 continue
             active = hover_pos is not None and action_rect.contains(QPointF(hover_pos))
-            if name == "flag" and index.data(FLAGGED_ROLE):
-                icon = self._flag_icon_set
+            paint_action(painter, action_rect, self._icons[name][1 if active else 0], active, self.theme)
+
+    def _paint_detail_line(self, painter: QPainter, line: QRectF, font: QFont, index) -> None:
+        # Condition with its icon, then steps, attachments and description, the condition is shortened first
+        detail_font = scaled_font(font, DETAIL_FONT_SCALE)
+        metrics = QFontMetricsF(detail_font)
+        icon_size = ipx(DETAIL_ICON_SIZE)
+        badges: list[tuple[QIcon, str]] = []
+        steps_text = index.data(STEPS_ROLE) or ""
+        if steps_text:
+            badges.append((self._steps_icon, steps_text))
+        count = index.data(COUNT_ROLE) or 0
+        if count:
+            badges.append((self._attachment_icon, str(count)))
+        if index.data(DESCRIPTION_ROLE):
+            badges.append((self._description_icon, ""))
+        badges_width = 0.0
+        for _icon, badge_text in badges:
+            badges_width += px(DETAIL_SPACING) + icon_size
+            if badge_text:
+                badges_width += px(META_ICON_SPACING) + metrics.horizontalAdvance(badge_text)
+        icon_top = round(line.top() + (line.height() - icon_size) / 2)
+
+        painter.save()
+        painter.setClipRect(line)
+        painter.setFont(detail_font)
+        left = line.left()
+        condition = index.data(CONDITION_ROLE) or ""
+        if condition:
+            state = index.data(STATE_ROLE) or ""
+            if state in (CONDITION_OVERDUE, CONDITION_DUE):
+                painter.setPen(self.theme.flag)
+            elif state == CONDITION_STARTED:
+                painter.setPen(self.theme.accent)
             else:
-                icon = self._icons[name][1 if active else 0]
-            paint_action(painter, action_rect, icon, active, self.theme)
+                painter.setPen(self.theme.muted)
+            date_icon, text_icon = self._condition_icons.get(state, self._condition_icons[""])
+            condition_icon = date_icon if index.data(CONDITION_KIND_ROLE) == "date" else text_icon
+            condition_icon.paint(painter, QRect(round(left), icon_top, icon_size, icon_size))
+            left += icon_size + px(META_ICON_SPACING)
+            available = max(px(20), line.right() - left - badges_width)
+            elided = QFontMetrics(detail_font).elidedText(condition, Qt.TextElideMode.ElideRight, round(available))
+            painter.drawText(QRectF(left, line.top(), available, line.height()), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+            left += metrics.horizontalAdvance(elided) + px(DETAIL_SPACING)
+
+        painter.setPen(self.theme.muted)
+        for icon, badge_text in badges:
+            icon.paint(painter, QRect(round(left), icon_top, icon_size, icon_size))
+            left += icon_size
+            if badge_text:
+                left += px(META_ICON_SPACING)
+                width = metrics.horizontalAdvance(badge_text) + 1.0
+                painter.drawText(QRectF(left, line.top(), width, line.height()), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, badge_text)
+                left += width
+            left += px(DETAIL_SPACING)
+        painter.restore()
 
     def _paint_lead(self, painter: QPainter, rect: QRectF, item_type: str, done: bool, selected: bool, index) -> None:
         # The circle behind the icon stands out from the selected card
         circle = self.theme.base if selected else self.theme.accent_selected
         if item_type == ITEM_TODO:
-            check = rect.adjusted(px(0.75), px(0.75), -px(0.75), -px(0.75))
-            check_radius = px(4)
-            if done:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(self.theme.muted)
-                painter.drawRoundedRect(check, check_radius, check_radius)
-                check_pen = QPen(self.theme.base, px(2))
-                check_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                check_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                painter.setPen(check_pen)
-                painter.drawPolyline([
-                    QPointF(check.left() + check.width() * 0.24, check.top() + check.height() * 0.52),
-                    QPointF(check.left() + check.width() * 0.43, check.top() + check.height() * 0.70),
-                    QPointF(check.left() + check.width() * 0.77, check.top() + check.height() * 0.32),
-                ])
-            else:
-                painter.setPen(QPen(self.theme.muted, px(1.5)))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRoundedRect(check, check_radius, check_radius)
+            paint_check(painter, rect.adjusted(px(0.75), px(0.75), -px(0.75), -px(0.75)), done, px(4), self.theme)
             return
 
         painter.setPen(Qt.PenStyle.NoPen)
@@ -2731,10 +2791,13 @@ class ItemListWidget(QListWidget):
         if kind != "action":
             if kind == "item":
                 index = self.indexAt(position)
-                return index.data(TOOLTIP_ROLE) or ""
+                tooltip = index.data(TOOLTIP_ROLE) or ""
+                geometry = self._item_delegate().card_geometry(self.visualRect(index), self.font(), index)
+                if geometry.title_elided:
+                    title = (index.data(Qt.ItemDataRole.DisplayRole) or "").replace("\n", " ")
+                    return title + "\n" + tooltip if tooltip else title
+                return tooltip
             return ""
-        if name == "flag":
-            return tr("Markierung entfernen")
         tooltip = ITEM_ACTION_TOOLTIPS.get(name, "")
         return tr(tooltip) if tooltip else ""
 
@@ -4443,6 +4506,26 @@ def create_task_icon(color: QColor) -> QIcon:
     return create_line_icon(color, path)
 
 
+def create_milestone_icon(color: QColor) -> QIcon:
+    # Diamond like a milestone
+    path = QPainterPath()
+    path.moveTo(8.0, 2.5)
+    path.lineTo(13.5, 8.0)
+    path.lineTo(8.0, 13.5)
+    path.lineTo(2.5, 8.0)
+    path.closeSubpath()
+    return create_line_icon(color, path)
+
+
+def create_description_icon(color: QColor) -> QIcon:
+    # Three text lines, the last one shorter
+    path = QPainterPath()
+    for y, right in ((4.5, 13.5), (8.0, 13.5), (11.5, 9.5)):
+        path.moveTo(2.5, y)
+        path.lineTo(right, y)
+    return create_line_icon(color, path)
+
+
 def create_group_add_icon(color: QColor) -> QIcon:
     path = QPainterPath()
     path.moveTo(2.25, 12.75)
@@ -4843,6 +4926,11 @@ def todo_condition(todo: Todo, today: Optional[date] = None) -> tuple[str, str]:
     return text, ""
 
 
+def has_detail_line(index) -> bool:
+    # Second line of a todo card: condition, steps, attachments or description
+    return bool(index.data(CONDITION_ROLE) or index.data(STEPS_ROLE) or index.data(COUNT_ROLE) or index.data(DESCRIPTION_ROLE))
+
+
 def format_timestamp(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).strftime(tr("%d.%m.%Y, %H:%M"))
 
@@ -5055,6 +5143,329 @@ def write_note_pdf(path: Path, title: str, subtitle: str, source: QTextDocument,
     painter.end()
 
 
+# Steps of a todo
+class StepDelegate(QStyledItemDelegate):
+    """Step row with checkbox and text"""
+
+    def __init__(self, view: StepList) -> None:
+        super().__init__(view)
+        self._view = view
+        self.theme = Theme.from_palette(QApplication.palette())
+        self.editor: Optional[QLineEdit] = None
+        self.closeEditor.connect(self._on_editor_destroyed)
+
+    def row_geometry(self, rect: QRect) -> tuple[QRectF, QRectF]:
+        center = rect.top() + rect.height() / 2
+        check_size = px(STEP_CHECK_SIZE)
+        check = QRectF(rect.left() + px(STEP_PADDING_H), center - check_size / 2, check_size, check_size)
+        text_left = check.right() + px(STEP_TEXT_SPACING)
+        text_right = rect.left() + rect.width() - px(STEP_PADDING_H)
+        text = QRectF(text_left, rect.top(), max(px(20), text_right - text_left), rect.height())
+        return check, text
+
+    def step_font(self, font: QFont, done: bool) -> QFont:
+        step_font = QFont(font)
+        step_font.setStrikeOut(done)
+        return step_font
+
+    def is_elided(self, rect: QRect, font: QFont, index) -> bool:
+        _check, text_rect = self.row_geometry(rect)
+        metrics = QFontMetricsF(self.step_font(font, bool(index.data(DONE_ROLE))))
+        return metrics.horizontalAdvance(index.data(Qt.ItemDataRole.DisplayRole) or "") > text_rect.width()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        height = QFontMetricsF(option.font).height() + px(STEP_PADDING_V) * 2
+        return QSize(self._view.viewport().width(), math.ceil(height))
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = option.rect
+        done = bool(index.data(DONE_ROLE))
+        check, text_rect = self.row_geometry(rect)
+
+        # Divider between two steps
+        if index.row() > 0:
+            painter.setPen(QPen(self.theme.divider, 1))
+            line_y = rect.top() + 0.5
+            painter.drawLine(QPointF(text_rect.left(), line_y), QPointF(text_rect.right(), line_y))
+
+        paint_check(painter, check, done, px(3.5), self.theme)
+
+        font = self.step_font(option.font, done)
+        painter.setFont(font)
+        painter.setPen(self.theme.muted if done else self.theme.text)
+        title = QFontMetrics(font).elidedText(index.data(Qt.ItemDataRole.DisplayRole) or "", Qt.TextElideMode.ElideRight, round(text_rect.width()))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
+        painter.restore()
+
+    # Renaming in the row
+    def createEditor(self, parent: QWidget, option: QStyleOptionViewItem, index) -> QWidget:
+        self.editor = create_inline_editor(parent)
+        self.editor.destroyed.connect(self._on_editor_destroyed)
+        return self.editor
+
+    def _on_editor_destroyed(self) -> None:
+        self.editor = None
+
+    def setEditorData(self, editor: QWidget, index) -> None:
+        editor.setText(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        editor.selectAll()
+
+    def setModelData(self, editor: QWidget, model, index) -> None:
+        self._view.rename_requested.emit(index.data(ID_ROLE), editor.text())
+
+    def updateEditorGeometry(self, editor: QWidget, option: QStyleOptionViewItem, index) -> None:
+        _check, text_rect = self.row_geometry(option.rect)
+        line_height = QFontMetricsF(option.font).height()
+        top = option.rect.top() + (option.rect.height() - line_height) / 2 - px(INLINE_EDIT_PADDING)
+        editor.setGeometry(QRect(round(text_rect.left() - px(5)), round(top), round(text_rect.width() + px(9)), round(line_height + px(INLINE_EDIT_PADDING) * 2)))
+
+
+class StepList(QListWidget):
+    """Steps of a todo, the checkbox marks a step as done, drag and drop changes the order"""
+
+    toggle_requested = Signal(str)
+    delete_requested = Signal(str)
+    rename_requested = Signal(str, str)
+    order_changed = Signal(list)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("stepList")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
+        self.setItemDelegate(StepDelegate(self))
+        self.model().rowsMoved.connect(self._on_rows_moved)
+
+    def delegate(self) -> StepDelegate:
+        return self.itemDelegate()
+
+    def rows_height(self, rows: int) -> int:
+        if self.count() == 0:
+            return 0
+        return min(self.count(), rows) * self.sizeHintForRow(0)
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), self.rows_height(STEP_MAX_ROWS))
+
+    def minimumSizeHint(self) -> QSize:
+        # The steps do not make the window taller, in a small window the list shows fewer steps and scrolls
+        return QSize(0, 0)
+
+    def update_height(self) -> None:
+        self.setMaximumHeight(self.rows_height(STEP_MAX_ROWS))
+        self.updateGeometry()
+        self.setVisible(self.count() > 0)
+
+    def finish_editing(self) -> None:
+        # A step that is being renamed keeps the new name
+        editor = self.delegate().editor
+        if editor is not None and self.state() == QAbstractItemView.State.EditingState:
+            self.commitData(editor)
+            self.closeEditor(editor, QStyledItemDelegate.EndEditHint.NoHint)
+
+    def _check_id(self, position: QPoint) -> str:
+        # Step whose checkbox is at the position, empty elsewhere
+        index = self.indexAt(position)
+        if index.isValid() is False:
+            return ""
+        check, _text = self.delegate().row_geometry(self.visualRect(index))
+        if check.adjusted(-px(5), -px(5), px(5), px(5)).contains(QPointF(position)):
+            return index.data(ID_ROLE)
+        return ""
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            step_id = self._check_id(event.position().toPoint())
+            if step_id:
+                self.toggle_requested.emit(step_id)
+                return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # The second click of a double click on the checkbox does not toggle again or rename
+        if self._check_id(event.position().toPoint()):
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            index = self.indexAt(event.pos())
+            if index.isValid() and self.delegate().is_elided(self.visualRect(index), self.font(), index):
+                QToolTip.showText(event.globalPos(), index.data(Qt.ItemDataRole.DisplayRole), self.viewport())
+            else:
+                QToolTip.hideText()
+            return True
+        return super().viewportEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        index = self.indexAt(event.pos())
+        if index.isValid() is False:
+            return
+        step_id = index.data(ID_ROLE)
+        theme = self.delegate().theme
+        menu = create_menu(self)
+        menu.addAction(create_rename_icon(theme.text), tr("Umbenennen"), lambda: self.edit(index))
+        menu.addAction(create_delete_icon(theme.text), tr("Löschen"), lambda: self.delete_requested.emit(step_id))
+        menu.exec(event.globalPos())
+        menu.deleteLater()
+
+    def _on_rows_moved(self, *args) -> None:
+        self.order_changed.emit([self.item(row).data(ID_ROLE) for row in range(self.count())])
+
+
+class StepEditor(QFrame):
+    """Checklist with the steps of a todo and a field for new steps"""
+
+    step_started = Signal()
+    changed = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("stepFrame")
+        self._steps: list[Step] = []
+
+        self._list = StepList()
+        self._list.toggle_requested.connect(self._toggle)
+        self._list.delete_requested.connect(self._delete)
+        self._list.rename_requested.connect(self._rename)
+        self._list.order_changed.connect(self._reorder)
+
+        self._divider = QFrame()
+        self._divider.setObjectName("stepDivider")
+        self._divider.setFixedHeight(1)
+
+        self._add_icon = QLabel()
+        self._add_edit = QLineEdit()
+        self._add_edit.setObjectName("stepAddEdit")
+        self._add_edit.setPlaceholderText(tr("Schritt hinzufügen"))
+        self._add_edit.returnPressed.connect(self._add)
+
+        # The text of the field starts where the text of the steps starts
+        self._add_row = QWidget()
+        add_layout = QHBoxLayout(self._add_row)
+        add_layout.setContentsMargins(STEP_PADDING_H, 0, STEP_PADDING_H, 0)
+        add_layout.setSpacing(STEP_TEXT_SPACING - 2)
+        add_layout.addWidget(self._add_icon)
+        add_layout.addWidget(self._add_edit, 1)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+        layout.addWidget(self._list)
+        layout.addWidget(self._divider)
+        layout.addWidget(self._add_row)
+        self.apply_theme(Theme.from_palette(QApplication.palette()))
+        self.apply_zoom()
+
+    @property
+    def step_list(self) -> StepList:
+        return self._list
+
+    @property
+    def add_edit(self) -> QLineEdit:
+        return self._add_edit
+
+    def apply_theme(self, theme: Theme) -> None:
+        self._list.delegate().theme = theme
+        size = ipx(STEP_CHECK_SIZE)
+        self._add_icon.setPixmap(create_add_icon(theme.muted).pixmap(size, size))
+        self._list.viewport().update()
+
+    def apply_zoom(self) -> None:
+        size = ipx(STEP_CHECK_SIZE)
+        self._add_icon.setFixedSize(size, size)
+        self._add_row.setFixedHeight(math.ceil(QFontMetricsF(self.font()).height() + px(STEP_PADDING_V) * 2))
+        self._rebuild()
+
+    def set_steps(self, steps: list[Step]) -> None:
+        self._list.finish_editing()
+        self._steps = steps
+        self._add_edit.clear()
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        self._list.clear()
+        for step in self._steps:
+            self._list.addItem(self._create_row(step))
+        self._update_layout()
+
+    def _create_row(self, step: Step) -> QListWidgetItem:
+        row = QListWidgetItem(step.title)
+        row.setData(ID_ROLE, step.id)
+        row.setData(DONE_ROLE, step.done)
+        row.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled)
+        return row
+
+    def _update_layout(self) -> None:
+        self._list.update_height()
+        self._divider.setVisible(bool(self._steps))
+
+    def _find(self, step_id: str) -> int:
+        for position, step in enumerate(self._steps):
+            if step.id == step_id:
+                return position
+        return -1
+
+    def _add(self) -> None:
+        title = " ".join(self._add_edit.text().split())
+        if not title:
+            return
+        self.step_started.emit()
+        step = Step.create(title)
+        self._steps.append(step)
+        self._add_edit.clear()
+        self._list.addItem(self._create_row(step))
+        self._update_layout()
+        self._list.scrollToBottom()
+        self.changed.emit()
+
+    def _toggle(self, step_id: str) -> None:
+        position = self._find(step_id)
+        if position < 0:
+            return
+        self.step_started.emit()
+        step = self._steps[position]
+        step.done = step.done is False
+        self._list.item(position).setData(DONE_ROLE, step.done)
+        self.changed.emit()
+
+    def _delete(self, step_id: str) -> None:
+        position = self._find(step_id)
+        if position < 0:
+            return
+        self.step_started.emit()
+        del self._steps[position]
+        self._list.takeItem(position)
+        self._update_layout()
+        self.changed.emit()
+
+    def _rename(self, step_id: str, title: str) -> None:
+        position = self._find(step_id)
+        title = " ".join(title.split())
+        if position < 0 or not title or title == self._steps[position].title:
+            return
+        self.step_started.emit()
+        self._steps[position].title = title
+        self._list.item(position).setText(title)
+        self.changed.emit()
+
+    def _reorder(self, ids: list[str]) -> None:
+        by_id = {step.id: step for step in self._steps}
+        if sorted(ids) != sorted(by_id) or ids == [step.id for step in self._steps]:
+            return
+        self.step_started.emit()
+        self._steps[:] = [by_id[step_id] for step_id in ids]
+        self.changed.emit()
+
+
 class ItemPanel(QWidget):
     """Right column for one item type: header with title, content and a footer with dates"""
 
@@ -5211,8 +5622,9 @@ class TodoPanel(ItemPanel):
         super().__init__(tr("Kein ToDo ausgewählt"), tr("Titel"), parent)
         self.setAcceptDrops(True)
 
-        self._description = DescriptionEditor(tr("Beschreibung"))
-        self._description.setMaximumHeight(300)
+        self._description = DescriptionEditor("")
+        self._description.setMaximumHeight(TODO_DESCRIPTION_MAX_HEIGHT)
+        self._description.text_edit().setMinimumHeight(TODO_DESCRIPTION_MIN_HEIGHT)
         self._description.changed.connect(self._on_description_changed)
         self._title_edit.submitted.connect(lambda: self._description.text_edit().setFocus())
 
@@ -5256,6 +5668,12 @@ class TodoPanel(ItemPanel):
         condition_layout.addWidget(self._calendar_button)
         condition_layout.addStretch()
 
+        self._steps = StepEditor()
+        self._steps.step_started.connect(self.step_started.emit)
+        self._steps.changed.connect(self.item_changed)
+        self._steps.changed.connect(self._fit_description)
+        self.body.installEventFilter(self)
+
         self._drop_zone = DropZone(tr("Dateien hierher ziehen, klicken oder Strg+V"))
         self._drop_zone.clicked.connect(self._choose_files)
 
@@ -5276,6 +5694,10 @@ class TodoPanel(ItemPanel):
 
         self.body_layout.addLayout(create_field_grid([(tr("Bedingung"), condition_row)]))
         self.body_layout.addSpacing(10)
+        self.body_layout.addWidget(create_section_label(tr("Schritte")))
+        self.body_layout.addWidget(self._steps)
+        self.body_layout.addSpacing(10)
+        self.body_layout.addWidget(create_section_label(tr("Beschreibung")))
         self.body_layout.addWidget(self._description)
         self.body_layout.addSpacing(10)
         self.body_layout.addWidget(create_section_label(tr("Anhänge")))
@@ -5285,6 +5707,7 @@ class TodoPanel(ItemPanel):
     def apply_theme(self, theme: Theme) -> None:
         super().apply_theme(theme)
         self._description.apply_theme(theme)
+        self._steps.apply_theme(theme)
         self._drop_zone.apply_theme(theme)
         self._condition_button.setIcon(create_chevron_down_icon(theme.muted))
         self._calendar_button.setIcon(create_calendar_icon(theme.text))
@@ -5294,15 +5717,36 @@ class TodoPanel(ItemPanel):
     def apply_zoom(self) -> None:
         super().apply_zoom()
         self._description.apply_zoom()
+        self._steps.apply_zoom()
         self._drop_zone.apply_theme(self._theme)
         self._condition_button.setIconSize(QSize(ipx(ICON_SIZE), ipx(ICON_SIZE)))
         self._calendar_button.setFixedSize(ipx(30), ipx(30))
         self._calendar_button.setIconSize(QSize(ipx(ICON_SIZE), ipx(ICON_SIZE)))
         if self._item is not None:
             self._rebuild_attachments()
+        self._fit_description()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.body and event.type() == QEvent.Type.Resize:
+            self._fit_description()
+        return super().eventFilter(watched, event)
+
+    def _fit_description(self) -> None:
+        # In a small window the description gives up its height first, so the steps stay visible
+        layout = self.body_layout
+        self._steps.updateGeometry()
+        layout.invalidate()
+        description_item = layout.itemAt(layout.indexOf(self._description))
+        others = layout.sizeHint().height() - description_item.sizeHint().height()
+        minimum = self._description.minimumSizeHint().height()
+        maximum = max(minimum, min(TODO_DESCRIPTION_MAX_HEIGHT, self.body.height() - others))
+        if maximum != self._description.maximumHeight():
+            self._description.setMaximumHeight(maximum)
 
     def load(self, todo: Todo) -> None:
         self._show_condition()
+        self._steps.set_steps(todo.steps)
+        self._fit_description()
         self._description.set_content(todo.description_html, todo.description)
         self._rebuild_attachments()
 
@@ -5403,6 +5847,7 @@ class TodoPanel(ItemPanel):
         menu.deleteLater()
 
     def clear(self) -> None:
+        self._steps.set_steps([])
         self._clear_attachments()
 
     def add_files(self, paths: list[Path]) -> None:
@@ -6450,6 +6895,10 @@ class MainWindow(QMainWindow):
             condition, state = todo_condition(item)
             row.setData(CONDITION_ROLE, condition)
             row.setData(STATE_ROLE, state)
+            done_steps = sum(1 for step in item.steps if step.done)
+            row.setData(STEPS_ROLE, f"{done_steps}/{len(item.steps)}" if item.steps else "")
+            row.setData(CONDITION_KIND_ROLE, "date" if iso_date(item.condition_date) is not None else "text")
+            row.setData(DESCRIPTION_ROLE, bool(item.description.strip()))
             flags |= Qt.ItemFlag.ItemIsUserCheckable
             if item.done is False:
                 flags |= Qt.ItemFlag.ItemIsDragEnabled

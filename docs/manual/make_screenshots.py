@@ -139,6 +139,10 @@ class Shooter:
         self.review.modified = now - 3600
         self.review.condition = app_module.CONDITION_UNTIL
         self.review.condition_date = (date.today() + timedelta(days=3)).isoformat()
+        for title, done in (("Check the navigation", True), ("Test the mobile view", False), ("Proofread the texts", False)):
+            step = app_module.Step.create(title)
+            step.done = done
+            self.review.steps.append(step)
         about = app_module.Todo.create("Write the about us page", self.content.id)
         about.condition = app_module.CONDITION_FROM
         about.condition_text = "design approval"
@@ -319,7 +323,7 @@ def main() -> int:
     QTimer.singleShot(MENU_DELAY_MS, grab_calendar)
     panel._show_calendar()
     detail = shooter.window_rect(window._detail_stack)
-    condition_crop = QRect(detail.left(), detail.top() + 50, detail.width(), calendar_covered[0].bottom() - detail.top() - 30)
+    condition_crop = QRect(detail.left(), detail.top() + 50, detail.width(), calendar_covered[0].bottom() - detail.top() - 42)
 
     # Main window with the positions of the callouts
     shooter.show(app_module.ITEM_TODO, shooter.review)
@@ -340,6 +344,12 @@ def main() -> int:
 
     # Areas of the screenshots shown as a detail in the manual, in window coordinates
     crops: dict[str, QRect] = {"todo_details": shooter.window_rect(window._detail_stack), "condition": condition_crop}
+    design_rect = shooter.window_rect(viewport, items.visualItemRect(items.find_row(app_module.KIND_SECTION, shooter.design.id)))
+    quotes_rect = shooter.window_rect(viewport, items.visualItemRect(items.find_row(app_module.KIND_ITEM, shooter.website.todos[-2].id)))
+    crops["todo_cards"] = QRect(design_rect.left(), design_rect.top(), design_rect.width(), quotes_rect.bottom() - design_rect.top() + 8)
+    steps_rect = shooter.window_rect(window._todo_panel._steps)
+    detail = shooter.window_rect(window._detail_stack)
+    crops["steps"] = QRect(detail.left(), steps_rect.top() - 40, detail.width(), steps_rect.height() + 56)
 
     # Project menu with the colors
     project_rect = window._project_list.visualItemRect(window._project_list.find_row(shooter.website.id))

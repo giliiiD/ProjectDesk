@@ -49,7 +49,7 @@ Project Desk is a Windows app for project-based work with a look based on Micros
 - Projects on the left, each with a color dot, plus the fixed project "General" and an archive
 - Three tabs per project: todos, notes and links, each with optional groups. Tabs can be hidden in the settings
 - Entries in the middle, sortable by drag and drop. Details of the selected entry on the right, the right column can be maximized
-- Todos with a condition: "Until" or "From", with a date or a text
+- Todos with steps as a checklist and a condition: "Until" or "From", with a date or a text
 - Formatted text with font sizes, highlight, bullet lists and numbered lists in all text fields
 - Notes with inline images and PDF export. Lines of a note can be turned into todos
 - Export and import of entries, groups and projects as `.pdesk` files
@@ -179,7 +179,8 @@ Structure of `data.json` (version 2):
           "attachments": [{"id": "…", "name": "Image.png", "file": "…_Image.png", "added": 1762250000.0}],
           "condition": "until",
           "condition_date": "2026-11-14",
-          "condition_text": ""
+          "condition_text": "",
+          "steps": [{"id": "…", "title": "Check the navigation", "done": false}]
         }
       ],
       "notes": [{"id": "…", "title": "…", "text": "…", "html": "…", "created": 0.0, "modified": 0.0, "group_id": null}],
@@ -203,6 +204,7 @@ Data rules:
 - Done todos appear in the section "Done" at the end of the todo tab and keep their group for when they are reopened
 - Done todos are never flagged. Checking a todo removes its flag, also after reopening. `Todo.from_dict` drops the flag of done todos
 - `condition` is empty, `until` or `from`. `condition_date` holds an ISO date or is empty, `condition_text` is used without a date. `Todo.from_dict` drops unknown kinds and invalid dates
+- `steps` is a list in the order shown. `Todo.from_dict` skips invalid entries, joins line breaks of titles into one line and gives duplicate step ids a new id. Versions before 2.4.0 ignore steps, so steps are lost when such a version saves the data or imports a file
 - Projects without a color get the next free color of `PROJECT_COLORS` (`AppData.normalize`), the general project starts gray
 - `touch` sets `modified` when the content of an entry changes in the right column. The footer shows "Created" and, after a change, "Changed"
 - Data is saved 300 ms after every change, through a temporary file and `os.replace`
@@ -224,11 +226,32 @@ Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\T
 - In the right column (`TodoPanel`) the row "Condition" has a button for the kind (None, Until, From), a field for a date or a text and a calendar icon. With "None" the field and the calendar are hidden but keep their space, so the layout does not move. Choosing "None" clears date and text
 - `parse_condition_date` accepts `14.11.2026`, `14.11.26`, `14.11.`, `14.11` and `2026-11-14`. Anything else is stored as text. A date without a year that lies more than half a year in the past (`CONDITION_NEXT_YEAR_DAYS`) refers to the next year. When the field loses focus, a date is shown in the date format of the language
 - The calendar (`TodoPanel._show_calendar`) opens below its icon in the colors of the app. A click selects the day
-- In the list the condition is a smaller, lighter second line below the title (`todo_condition`, `CONDITION_ROLE`, `CONDITION_FONT_SCALE`), for example "Until 14.11.2026" or "From design approval". Today, tomorrow and yesterday are shown as words, long texts are shortened with an ellipsis
-- With a one-line title the card keeps the height of a todo without condition: the vertical padding shrinks down to `CONDITION_MIN_PADDING`, and checkbox, flag and attachment count are centered vertically. Only titles with several lines make the card taller
-- Colors (`STATE_ROLE`): red when an "Until" date is today or past, blue when a "From" date is reached, otherwise gray. Done todos and text conditions are always gray. There is no additional text such as "overdue"
+- In the list the condition starts the second line of the todo card (`todo_condition`, `CONDITION_ROLE`), for example "Until 14.11.2026" or "From design approval". A calendar icon stands before a date, a diamond like a milestone before a text (`CONDITION_KIND_ROLE`). Today, tomorrow and yesterday are shown as words. If the line is too narrow, the condition is shortened with an ellipsis
+- Colors (`STATE_ROLE`) of text and icon: red when an "Until" date is today or past, blue when a "From" date is reached, otherwise gray. Done todos and text conditions are always gray. There is no additional text such as "overdue"
 - `MainWindow._check_day` checks every minute (`DAY_CHECK_MS`) whether the date has changed and updates the cards, also after the computer was asleep
 - Choosing the kind and choosing a day in the calendar are separate undo steps (`ItemPanel.step_started`). Typing in the field is one step per entry
+
+## Todo Steps
+
+- A todo can have steps, a checklist of small tasks (`Step`, `Todo.steps`)
+- In the right column the section "Steps" lies between condition and description (`StepEditor`). It shows the steps (`StepList`, `StepDelegate`) and the field "Add step" below them. Without steps only the field is shown
+- Enter in the field adds a step at the end, the field keeps the focus for the next step. Empty input adds nothing, several spaces and line breaks become one space
+- A click on the checkbox marks a step as done or open. Done steps are gray and struck through and keep their place. The second click of a double-click on the checkbox does nothing
+- Double-click on the text or "Rename" in the right-click menu renames a step. An empty name keeps the old one. A step that is being renamed keeps the new name when another todo is selected (`StepList.finish_editing`)
+- "Delete" in the right-click menu deletes a step without a question, Ctrl+Z brings it back. There is no delete icon in the rows
+- Drag and drop changes the order (`InternalMove`, `rowsMoved`)
+- Long step titles are shortened with an ellipsis, the tooltip shows the full title
+- The list shows up to `STEP_MAX_ROWS` steps and scrolls for more. It has no minimum height, so steps never make the window taller. In a small window the description gives up its height first, down to `TODO_DESCRIPTION_MIN_HEIGHT` (`TodoPanel._fit_description`), then the list shows fewer steps and scrolls
+- Checking all steps does not mark the todo as done, and marking the todo as done does not change its steps
+- Every change of a step is an undo step of its own (`ItemPanel.step_started`)
+- The card in the list shows the progress, for example "2/5", in the second line (`STEPS_ROLE`)
+
+## Todo Cards
+
+- Every todo card has the same height (`TODO_PADDING_V`), checkbox and flag are centered vertically
+- The title is always one line and is shortened with an ellipsis when it does not fit (`CardGeometry.title_elided`). The tooltip of the card then shows the full title, for links followed by the address. The same applies to notes and links
+- The second line (`has_detail_line`, `_paint_detail_line`) is smaller and lighter (`DETAIL_FONT_SCALE`, `DETAIL_ICON_SIZE`) and shows, from left to right and only when present: condition, progress of the steps, number of attachments and an icon for a description (`DESCRIPTION_ROLE`). Without a second line the title is centered vertically
+- The flag of a flagged todo always sits at the right edge (`CardGeometry.flag_rect`). It only marks the todo, flag and remove flag are in the right-click menu
 
 ## Update Notice
 
@@ -279,7 +302,7 @@ files/images/<file>.png
 {
   "format": "projectdesk-export",
   "format_version": 1,
-  "app_version": "2.3.1",
+  "app_version": "2.4.0",
   "kind": "items | group | project",
   "item_type": "todo | note | link, null for a project",
   "name": "…",
@@ -312,7 +335,7 @@ Import:
 - 50 steps (`UNDO_LIMIT`). A new change clears the redo steps
 - While a text field has focus, Ctrl+Z and Ctrl+Y act on that field
 - Typing in the right column is one step per entry (`ItemPanel.edit_started`, `_editing_key`). Selecting another entry starts a new step
-- Choices in the right column, such as the kind of a condition or a day in the calendar, are separate steps (`ItemPanel.step_started`, `MainWindow._on_step_started`)
+- Choices in the right column, such as the kind of a condition, a day in the calendar or a change of a todo step, are separate steps (`ItemPanel.step_started`, `MainWindow._on_step_started`)
 - Creating and naming a project, group or entry is one step, moving or deleting several selected entries as well
 - If the restored view refers to a hidden tab, the first visible tab is shown
 - Opening another storage location clears all steps
@@ -355,11 +378,12 @@ Order in `project_desk.py`:
 | Dialogs | `DialogIcon`, `create_message_dialog`, `add_dialog_button`, `show_message`, `confirm`, `ask` |
 | `Theme` | Colors derived from the palette and the style sheet |
 | Links and clipboard | `open_link`, `looks_like_address`, `link_title_from_url`, `parse_link_input`, `note_preview`, `package_paths`, `image_from_mime` |
-| Data model | `Attachment`, `Todo`, `Note`, `Link`, `touch`, `item_title`, `contacts_note`, `ItemGroup`, `Project`, `AppData` |
+| Data model | `Attachment`, `Step`, `Todo`, `Note`, `Link`, `touch`, `item_title`, `contacts_note`, `ItemGroup`, `Project`, `AppData` |
 | `Storage` | Loading, saving, attachments, note images, moving, backups, files of deleted entries |
 | `item_payload`, `parse_item_payload` | Dragged entries as "type:id,id,id" |
 | `ProjectDelegate` | Project rows: color dot, name, flag, count and the archive row |
-| `ItemDelegate` | Cards of all types, group and done headers, add icon of groups, inline editor |
+| `paint_action`, `paint_check`, `create_inline_editor` | Icons in cards, checkboxes of todos and steps, inline editor |
+| `ItemDelegate` | Cards of all types with the second line of todos, group and done headers, add icon of groups, inline editor |
 | `ProjectListWidget` | Left list: archive, right-click menu, drag and drop of projects and entries |
 | `ItemListWidget` | Middle list: checkbox and icon clicks, groups, add icon, renaming, multi selection, right-click menu, drag and drop |
 | `highlight_color`, `tabular_figures`, `is_bullet_list`, `link_ranges` | Helpers of the text editor |
@@ -367,11 +391,12 @@ Order in `project_desk.py`:
 | `TitleEdit`, `ElidedLabel`, `DropZone`, `StatusBanner`, `RichTextEdit`, `DescriptionEditor` | Text editing with formats, sizes, highlight and lists, links, inline images, editor menu, toolbar, attachment drop zone, blue bar |
 | `ScaledImage`, `ImageViewer`, `AttachmentCard` | Attachments with preview of images and PDF files |
 | Icon functions | `create_..._icon`, line icons drawn with `create_line_icon`, `add_badge` for the blue dot |
-| Formatting | `backup_label`, `format_date`, `iso_date`, `parse_condition_date`, `format_condition_date`, `todo_condition`, `format_timestamp`, `count_text`, `entries_text`, `format_size` |
+| Formatting | `backup_label`, `format_date`, `iso_date`, `parse_condition_date`, `format_condition_date`, `todo_condition`, `has_detail_line`, `format_timestamp`, `count_text`, `entries_text`, `format_size` |
 | Export package | `PackageError`, `package_files`, `write_package`, `ImportPackage` |
 | `write_note_pdf` | PDF export of a note |
+| `StepDelegate`, `StepList`, `StepEditor` | Steps of a todo in the right column |
 | `ItemPanel` | Base of the right column: title, maximize icon, content, footer with dates |
-| `TodoPanel`, `NotePanel`, `LinkPanel` | Right column per tab. `TodoPanel` holds condition, description and attachments |
+| `TodoPanel`, `NotePanel`, `LinkPanel` | Right column per tab. `TodoPanel` holds condition, steps, description and attachments |
 | `TabBar` | Tabs of the middle column |
 | `InputFilter` | Ctrl+V for attachments and note images, Ctrl and mouse wheel for zoom |
 | `MainWindow` | Layout, rendering, menus, actions, export, import, undo, backups, settings, saving |
@@ -385,10 +410,11 @@ General:
 - Look and feel of Microsoft Outlook, clean and professional
 - Only what a project needs. No contacts, they belong in Outlook
 - Actions are in right-click menus. Hovering only highlights and shows no icons
-- Always visible in the lists: checkbox and set flag of todos, open icon of links, add icon of group headers. A click on a set flag removes it
+- Always visible in the lists: checkbox and set flag of todos, open icon of links, add icon of group headers. The flag only marks a todo and is set and removed in the right-click menu
 - The header of the right column shows the title and the maximize icon, no other buttons
 - Renaming by double-click or through "Rename" in the right-click menu
-- Deleting always asks through `confirm` (warning icon, buttons "Delete" and "Cancel")
+- Deleting always asks through `confirm` (warning icon, buttons "Delete" and "Cancel"). The only exception are todo steps, Ctrl+Z brings them back
+- The right column of todos has the headings Condition (left of the row), Steps, Description and Attachments (above their content)
 - Questions with more than two answers use `ask`
 - Menus are always created with `create_menu`, for rounded corners and submenus next to their parent. Menu entries have line icons where available
 - Icons are line icons drawn with `create_line_icon`, no emojis and no Qt standard icons. Only the dialog icons info, warning and error are filled, as in Windows
@@ -415,6 +441,7 @@ Middle list:
 - Entries without a group first, then the groups with a collapsible header, add icon and count
 - A click on a group header collapses or expands it, a double-click renames it
 - The add icon of a group creates an entry in that group and opens its name for editing. Enter saves and opens the next one, in the notes tab Enter continues in the note text. Esc or an empty name removes the new entry
+- Titles are one line, shortened with an ellipsis, the tooltip shows the full title
 - The inline editor has the same height for all entry types and never covers the second line
 - Drag and drop sorts entries, moves them into another group (also onto a collapsed group header) or onto a project
 - Group headers can be dragged to change the order of groups
@@ -422,7 +449,7 @@ Middle list:
 - Enter in the empty note field creates a note named with today's date
 - A pasted address in the link field creates a link named after its host
 - Notes and links have a large round icon on the left. On a selected card the circle is white, in dark mode dark
-- Group headers have a highlight band with space around the add icon (`SECTION_BAND_PADDING`)
+- Group headers have a highlight band with space around the add icon (`SECTION_BAND_PADDING`). A group header in the first row has less space above (`header_band` measures from the bottom of the row), so the list starts directly below the input field
 - The open icon of links is vertically centered on the card
 - The scroll bar keeps a gap to the cards (style sheet of `QListWidget#itemList`). The mouse wheel scrolls in small steps (`LIST_SCROLL_STEP`, scaled with the zoom)
 
@@ -430,7 +457,7 @@ Colors:
 - Projects: hover light blue, selected gray, no accent bar
 - Cards: hover light blue with a blue accent bar on the left, selected darker blue, also for every entry of a multi selection
 - Flagged todos: yellow background and the red flag, the title keeps the text color. Darker yellow when selected
-- The icons on the right of todo cards align to the right edge: the attachment count at the edge, the flag to its left, or the flag at the edge without attachments. No space is reserved for hidden icons
+- The flag is the only icon on the right of todo cards and always sits at the right edge. Condition, steps, attachments and description are shown in the second line
 
 Text editing:
 - Toolbar (`DescriptionEditor`) for todo descriptions, notes and link notes: bold, italic, underline, strikethrough | font size, highlight | bullet list, numbered list. Thin lines separate the groups. The toolbar never widens the column (size policy `Ignored`)
@@ -499,6 +526,7 @@ Check on Windows after related changes, since offscreen mode cannot show them:
 - the animation of the blue bar and scrolling with the mouse wheel
 - updating an existing installation
 - the calendar of conditions and the change of day while the program stays open
+- reordering todo steps by drag and drop
 - the update notice in the company network
 
 ## Working on Change Requests
@@ -521,6 +549,14 @@ Check on Windows after related changes, since offscreen mode cannot show them:
 - The installer is not signed
 
 ## Version History
+
+### 2.4.0
+- Todos can have steps: a checklist in the right column, the card shows the progress such as "2/5"
+- Todo cards are one size: the title is one line and is shortened when it does not fit, the tooltip shows the full title. The same applies to notes and links
+- Condition, steps, attachments and a description are shown with icons in the second line of the card, the flag always sits at the right edge
+- The flag is set and removed in the right-click menu only
+- Steps and description have a heading in the right column
+- A group at the top of the list starts directly below the input field, so the scroll bar no longer starts above the content
 
 ### 2.3.3
 - The condition appears as a smaller second line below the todo title, todos with and without condition have the same height
