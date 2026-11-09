@@ -216,7 +216,7 @@ Files of deleted entries:
 - When the program closes, `Storage.collect_garbage` moves attachments and note images that `data.json` no longer references to `backups\files\`. Files there that neither a backup nor `data_v1_backup.json` references are deleted
 - `Storage.restore_files` moves files back after undo, redo or restoring a backup
 
-Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\ToDo\ToDo` (QSettings, the old name keeps existing settings): `dataFolder`, `geometry`, `splitter`, `archiveExpanded`, `colorMode`, `zoom`, `language`, `activeTab`, `enabledTabs`, `sidebarCollapsed`, `sidebarWidth`, `pdfFolder`, `autoBackup`, `exchangeFolder`. Without `sidebarCollapsed`, the project column starts collapsed when only the general project exists. `enabledTabs` lists the visible tabs separated by spaces, for example `todo note`. Without it, all tabs are visible.
+Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\ToDo\ToDo` (QSettings, the old name keeps existing settings): `dataFolder`, `geometry`, `splitter`, `archiveExpanded`, `colorMode`, `zoom`, `language`, `activeTab`, `projectTabs`, `enabledTabs`, `sidebarCollapsed`, `sidebarWidth`, `pdfFolder`, `autoBackup`, `exchangeFolder`. Without `sidebarCollapsed`, the project column starts collapsed when only the general project exists. `enabledTabs` lists the visible tabs separated by spaces, for example `todo note`. Without it, all tabs are visible. `projectTabs` stores the last open tab per project id as JSON.
 
 ## Todo Conditions
 
@@ -241,6 +241,7 @@ Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\T
 
 ## Tabs Setting
 
+- Every project remembers its last open tab (`_activate_project`, `_remember_tab`, setting `projectTabs`). A project opened for the first time shows the first visible tab. Deleted projects are removed from the setting
 - **Settings > Tabs** shows or hides todos, notes and links per user. Hidden tabs keep their data
 - At least one tab remains visible, its menu entry is disabled while it is the last one
 - With only one visible tab the tab row is hidden
@@ -519,6 +520,9 @@ Check on Windows after related changes, since offscreen mode cannot show them:
 - The installer is not signed
 
 ## Version History
+
+### 2.3.2
+- Every project remembers its last open tab, also after a restart
 
 ### 2.3.1
 - The program is named "Project Desk" in the window, dialogs, start menu, installer and documentation

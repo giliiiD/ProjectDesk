@@ -107,7 +107,7 @@ except ImportError:
 # Constants
 APP_NAME = "ProjectDesk"
 APP_TITLE = "Project Desk"
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.3.2"
 UPDATE_API_URL = "https://api.github.com/repos/giliiiD/ProjectDesk/releases/latest"
 RELEASES_URL = "https://github.com/giliiiD/ProjectDesk/releases/latest"
 UPDATE_CHECK_DELAY_MS = 3000
@@ -5757,7 +5757,8 @@ class MainWindow(QMainWindow):
         self._icon_buttons: list[tuple[QToolButton, object]] = []
 
         self._enabled_tabs = self._load_enabled_tabs()
-        self._tab = str(settings.value("activeTab", ITEM_TODO))
+        self._project_tabs = self._load_project_tabs()
+        self._tab = self._project_tabs.get(data.active_project_id, str(settings.value("activeTab", ITEM_TODO)))
         if self._tab not in self._enabled_tabs:
             self._tab = self._enabled_tabs[0]
 
@@ -6508,6 +6509,30 @@ class MainWindow(QMainWindow):
         self._apply_enabled_tabs()
         self._render_all()
 
+    def _load_project_tabs(self) -> dict[str, str]:
+        # Last open tab per project id
+        try:
+            values = json.loads(str(self._settings.value("projectTabs", "{}")))
+        except ValueError:
+            return {}
+        if not isinstance(values, dict):
+            return {}
+        return {str(project_id): str(tab) for project_id, tab in values.items() if tab in ITEM_TYPES}
+
+    def _remember_tab(self) -> None:
+        self._project_tabs[self._data.active_project_id] = self._tab
+        known = {project.id for project in self._data.projects}
+        self._project_tabs = {project_id: tab for project_id, tab in self._project_tabs.items() if project_id in known}
+        self._settings.setValue("projectTabs", json.dumps(self._project_tabs))
+        self._settings.setValue("activeTab", self._tab)
+
+    def _activate_project(self, project_id: str) -> None:
+        # Every project opens with the tab that was open there the last time
+        self._data.active_project_id = project_id
+        tab = self._project_tabs.get(project_id, self._enabled_tabs[0])
+        self._tab = tab if tab in self._enabled_tabs else self._enabled_tabs[0]
+        self._clear_selection()
+
     def _apply_enabled_tabs(self) -> None:
         # Hidden tabs keep their data, with only one tab the tab row disappears
         self._tab_bar.set_tabs(self._enabled_tabs)
@@ -6516,14 +6541,14 @@ class MainWindow(QMainWindow):
         if self._tab not in self._enabled_tabs:
             self._tab = self._enabled_tabs[0]
             self._selection = []
-            self._settings.setValue("activeTab", self._tab)
+            self._remember_tab()
 
     def _on_tab_changed(self, item_type: str) -> None:
         if item_type == self._tab:
             return
         self._tab = item_type
         self._selection = []
-        self._settings.setValue("activeTab", item_type)
+        self._remember_tab()
         self._render_header()
         self._render_input()
         self._render_items()
@@ -6537,9 +6562,9 @@ class MainWindow(QMainWindow):
         if project_id == self._data.active_project_id:
             return
 
-        self._data.active_project_id = project_id
-        self._clear_selection()
+        self._activate_project(project_id)
         self._render_header()
+        self._render_input()
         self._render_items()
         self._render_detail()
         self._schedule_save()
@@ -6601,8 +6626,7 @@ class MainWindow(QMainWindow):
         self._fresh_name_id = project.id
         project.color = self._data.next_color()
         self._data.projects.insert(len(self._data.open_projects()), project)
-        self._data.active_project_id = project.id
-        self._clear_selection()
+        self._activate_project(project.id)
         self._render_all()
         self._schedule_save()
 
@@ -6655,8 +6679,7 @@ class MainWindow(QMainWindow):
         self._checkpoint()
         self._data.projects.remove(project)
         if self._data.active_project_id == project.id:
-            self._data.active_project_id = self._data.general_project().id
-            self._clear_selection()
+            self._activate_project(self._data.general_project().id)
         self._render_all()
         self._schedule_save()
 
@@ -6674,8 +6697,7 @@ class MainWindow(QMainWindow):
             self._data.projects.insert(len(self._data.open_projects()), project)
 
         if archived and self._data.active_project_id == project.id:
-            self._data.active_project_id = self._data.general_project().id
-            self._clear_selection()
+            self._activate_project(self._data.general_project().id)
         self._render_all()
         self._schedule_save()
 
@@ -6713,8 +6735,7 @@ class MainWindow(QMainWindow):
             self._data.projects.insert(position, dragged)
 
         if dragged.archived and self._data.active_project_id == dragged.id:
-            self._data.active_project_id = self._data.general_project().id
-            self._clear_selection()
+            self._activate_project(self._data.general_project().id)
         self._render_all()
         self._schedule_save()
 
@@ -7412,14 +7433,13 @@ class MainWindow(QMainWindow):
             self._apply_enabled_tabs()
 
         # Show the result in its project and tab
-        self._data.active_project_id = project.id
-        self._clear_selection()
+        self._activate_project(project.id)
         if first is not None:
             self._tab = first[0]
             self._selected[first[0]] = first[1]
         elif package.kind != EXPORT_PROJECT:
             self._tab = package.item_type
-        self._settings.setValue("activeTab", self._tab)
+        self._remember_tab()
         self._render_all()
         row = self._item_list.currentItem()
         if row is not None:
@@ -7594,6 +7614,7 @@ class MainWindow(QMainWindow):
         self._tab = view.get("tab", self._tab)
         if self._tab not in self._enabled_tabs:
             self._tab = self._enabled_tabs[0]
+        self._remember_tab()
         self._selected = dict(view.get("selected", self._selected))
         self._selection = []
         self._quick_add_id = None

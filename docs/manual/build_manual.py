@@ -174,7 +174,7 @@ def write_chapters(manual: Manual) -> None:
 """)
 
     manual.chapter("Tabs and Groups", f"""
-<p>Every project has the tabs {ui("Todos")}, {ui("Notes")} and {ui("Links")}. Each tab has its own groups, for example {ui("Design")} and {ui("Content")}. Groups are optional, entries without a group appear at the top.</p>
+<p>Every project has the tabs {ui("Todos")}, {ui("Notes")} and {ui("Links")}. Each tab has its own groups, for example {ui("Design")} and {ui("Content")}. Groups are optional, entries without a group appear at the top. Each project remembers the tab that was open last.</p>
 <ul>
 <li>{ui("New group")}: right-click the empty space in the list and choose {ui("New group")}.</li>
 <li>{ui("Collapse or expand")}: click the group header.</li>
