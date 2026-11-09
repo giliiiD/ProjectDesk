@@ -155,7 +155,7 @@ def write_chapters(manual: Manual) -> None:
 <h3>First start</h3>
 <p>ProjectDesk asks for a folder in which all data is stored. A folder in your OneDrive is a good choice because OneDrive backs it up automatically. The folder can be changed later (see {ui("Storage Location")}).</p>
 <h3>Update</h3>
-<p>Download the new setup and run it over the installed version. Your data and settings are kept. An existing installation of the predecessor {ui("ToDo")} is updated to ProjectDesk the same way.</p>
+<p>When a new version is available, ProjectDesk shows a blue dot on {ui("Settings")} (see {ui("Settings")}). Download the new setup and run it over the installed version. Your data and settings are kept. An existing installation of the predecessor {ui("ToDo")} is updated to ProjectDesk the same way.</p>
 <p>Only one ProjectDesk window runs at a time. Starting it again brings the open window to the front.</p>
 """)
 
@@ -306,6 +306,8 @@ def write_chapters(manual: Manual) -> None:
 <li>{ui("Storage location")} and {ui("Backups")}: see the previous chapters.</li>
 <li>The installed version is shown at the bottom of the menu.</li>
 </ul>
+<p>Once per start ProjectDesk looks on GitHub whether a newer version exists. If so, a blue bar says {ui("Update available")} once and the gear of {ui("Settings")} gets a blue dot. The version line at the bottom of the menu then shows {ui("(update available)")}, a click opens the download page with the new setup. The dot stays until the new version is installed. Without an internet connection nothing happens.</p>
+{manual.figure("settings_update.png", "A newer version in the settings", size=50)}
 """, flow=True)
 
     shortcuts = [

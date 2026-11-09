@@ -48,6 +48,7 @@ ProjectDesk is a Windows application for project based work, visually based on M
 - Every project has three tabs: todos, notes and links, each with optional groups. Tabs can be hidden in the settings
 - List in the middle, sortable by drag and drop, details of the selected entry on the right, the right column can be maximized
 - Todos with a condition: until or from, as a date or as a text
+- Notice of a newer version, checked on GitHub once per start
 - Formatted text with font sizes, highlight, bullet and numbered lists in all text fields
 - Notes with inline images, export as PDF, lines can be turned into todos
 - Entries, groups and whole projects can be exported as `.pdesk` files and imported by colleagues
@@ -237,6 +238,16 @@ Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\T
 - `MainWindow._check_day` checks every minute (`DAY_CHECK_MS`) whether the date changed and updates the cards, also after the computer slept
 - Choosing the kind and choosing a day in the calendar are undo steps of their own (`ItemPanel.step_started`), typing in the field is one step per entry
 
+## Update Notice
+
+- Once per start, 3 seconds after the window opened (`UPDATE_CHECK_DELAY_MS`), `UpdateChecker` asks the GitHub API for the latest release (`UPDATE_API_URL`) in a background thread with Python's `urllib`. Only this request is sent, with the user agent `ProjectDesk/<version>`
+- `UpdateState` keeps the result for the whole run, so a window rebuilt after a language change does not ask again and still shows the notice
+- A newer version (`is_newer_version` compares the numbers of `tag_name` and `APP_VERSION`) shows the blue bar "Update available, see Settings" once, a blue dot on the settings icon (`add_badge`, `_update_settings_icons`) and on the info icon of the version line. The version line then reads "Version x.y.z (update available)" and opens the release page
+- The dot stays until the new version is installed. There is no setting to switch the check off
+- Without connection, through a blocking proxy, with an error or a timeout (`UPDATE_TIMEOUT_SECONDS`) nothing happens, there is no message
+- The GitHub API allows 60 requests per hour and internet address without login. One request per start is far below that for a team behind one company address
+- The repository must stay public and keep its name, otherwise the constants `UPDATE_API_URL` and `RELEASES_URL` need to change
+
 ## Tabs Setting
 
 - `Settings > Tabs` shows or hides todos, notes and links per user. Hidden tabs keep their data, nothing is deleted
@@ -361,6 +372,7 @@ Order inside `project_desk.py`:
 | `TitleEdit`, `ElidedLabel`, `DropZone`, `StatusBanner`, `RichTextEdit`, `DescriptionEditor` | Text editing with formats, sizes, highlight and lists, links, inline images, editor right click menu, formatting toolbar, attachment drop zone, blue message bar |
 | `ScaledImage`, `ImageViewer`, `AttachmentCard` | Attachments with preview for images and PDF files |
 | Icon functions | `create_..._icon`, all drawn as line icons through `create_line_icon` |
+| Update notice | `version_numbers`, `is_newer_version`, `UpdateState`, `UpdateChecker` |
 | Formatting | `backup_label`, `format_date`, `iso_date`, `parse_condition_date`, `format_condition_date`, `todo_condition`, `format_timestamp`, `count_text`, `entries_text`, `format_size` |
 | Export package | `PackageError`, `package_files`, `write_package`, `ImportPackage` |
 | `write_note_pdf` | PDF export of a note |
@@ -493,6 +505,7 @@ Not testable in offscreen mode, check these on Windows after related changes:
 - the animation of the message bar and scrolling with the mouse wheel
 - the update of an existing ToDo installation
 - the calendar of conditions and the change of the day while ProjectDesk stays open
+- the update notice in the company network, behind its proxy
 
 ## Workflow for Change Requests
 
@@ -516,6 +529,9 @@ This way of working has proven itself:
 - The installer is not signed
 
 ## Version History
+
+### 2.3.0
+- Once per start ProjectDesk looks on GitHub for a newer version. If there is one, a blue bar says so once, the settings icon gets a blue dot and the version line in the settings opens the download page
 
 ### 2.2.0
 - Todos can have a condition: "Until" for a deadline or "From" for the earliest start, as a date or as a text

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import copy
 import getpass
+import http.client
 import json
 import math
 import os
 import re
 import shutil
 import sys
+import threading
 import time
+import urllib.request
 import uuid
 import zipfile
 from dataclasses import asdict, dataclass, field
@@ -103,7 +106,11 @@ except ImportError:
 
 # Constants
 APP_NAME = "ProjectDesk"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
+UPDATE_API_URL = "https://api.github.com/repos/giliiiD/ProjectDesk/releases/latest"
+RELEASES_URL = "https://github.com/giliiiD/ProjectDesk/releases/latest"
+UPDATE_CHECK_DELAY_MS = 3000
+UPDATE_TIMEOUT_SECONDS = 10
 APP_USER_MODEL_ID = "ProjectDesk.App"
 SETTINGS_ORGANIZATION = "ToDo"
 SETTINGS_APPLICATION = "ToDo"
@@ -421,6 +428,8 @@ TRANSLATIONS = {
     "%d.%m.%Y": "%Y-%m-%d",
     "%d.%m.%Y, %H:%M": "%Y-%m-%d %H:%M",
     "Ab": "From",
+    "Version {version} (Update verfügbar)": "Version {version} (update available)",
+    "Update verfügbar, siehe Einstellungen": "Update available, see Settings",
     "Art der Bedingung": "Kind of condition",
     "Bedingung": "Condition",
     "Bis": "Until",
@@ -3042,6 +3051,53 @@ class DropZone(QFrame):
         super().mouseReleaseEvent(event)
 
 
+def version_numbers(text: str) -> Optional[tuple[int, ...]]:
+    try:
+        return tuple(int(part) for part in text.strip().lstrip("vV").split("."))
+    except ValueError:
+        return None
+
+
+def is_newer_version(candidate: str, current: str) -> bool:
+    candidate_numbers = version_numbers(candidate)
+    current_numbers = version_numbers(current)
+    return candidate_numbers is not None and current_numbers is not None and candidate_numbers > current_numbers
+
+
+class UpdateState:
+    """Result of the update check, once per start of the program"""
+
+    checked = False
+    version = ""
+    url = ""
+
+
+class UpdateChecker(QObject):
+    """Looks up the newest release on GitHub in the background"""
+
+    found = Signal(str, str)
+
+    def start(self) -> None:
+        if UpdateState.checked:
+            return
+        UpdateState.checked = True
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        # Without connection, proxy or answer nothing happens
+        request = urllib.request.Request(UPDATE_API_URL, headers={"Accept": "application/vnd.github+json", "User-Agent": f"{APP_NAME}/{APP_VERSION}"})
+        try:
+            with urllib.request.urlopen(request, timeout=UPDATE_TIMEOUT_SECONDS) as response:
+                values = json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError, http.client.HTTPException):
+            return
+        if not isinstance(values, dict):
+            return
+        version = str(values.get("tag_name", "")).strip().lstrip("vV")
+        if is_newer_version(version, APP_VERSION):
+            self.found.emit(version, str(values.get("html_url") or RELEASES_URL))
+
+
 class StatusBanner(QWidget):
     """Short message in a blue bar that slides up over the bottom of the window and back down"""
 
@@ -4220,6 +4276,18 @@ def create_settings_icon(color: QColor, width: int = ICON_SIZE) -> QIcon:
     path.closeSubpath()
     path.addEllipse(QPointF(8.0, 8.0), 2.25, 2.25)
     return create_line_icon(color, path, width)
+
+
+def add_badge(icon: QIcon, color: QColor, ring: QColor, width: int = ICON_SIZE) -> QIcon:
+    # Filled dot at the upper right of the symbol
+    pixmap = icon.pixmap(QSize(width, ICON_SIZE), 2.0)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(QPen(ring, 1.5))
+    painter.setBrush(color)
+    painter.drawEllipse(QPointF(13.25, 2.75), 2.75, 2.75)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def create_language_icon(color: QColor) -> QIcon:
@@ -5684,6 +5752,11 @@ class MainWindow(QMainWindow):
         self._day_timer.timeout.connect(self._check_day)
         self._day_timer.start()
 
+        # Once per start a look on GitHub for a newer version
+        self._update_checker = UpdateChecker(self)
+        self._update_checker.found.connect(self._on_update_found)
+        QTimer.singleShot(UPDATE_CHECK_DELAY_MS, self._start_update_check)
+
         self.setWindowTitle(APP_NAME)
         self.setAcceptDrops(True)
         self.resize(1300, 800)
@@ -5984,6 +6057,25 @@ class MainWindow(QMainWindow):
         self._project_list.viewport().update()
         self._item_list.viewport().update()
 
+    def _update_settings_icons(self) -> None:
+        # A new version adds a dot to the settings icon
+        wide = create_settings_icon(self._theme.text, ICON_SIZE + FOLDER_ICON_GAP)
+        narrow = create_settings_icon(self._theme.text)
+        if UpdateState.version:
+            wide = add_badge(wide, self._theme.accent, self._theme.window, ICON_SIZE + FOLDER_ICON_GAP)
+            narrow = add_badge(narrow, self._theme.accent, self._theme.window)
+        self._settings_button.setIcon(wide)
+        self._rail_settings_button.setIcon(narrow)
+
+    def _start_update_check(self) -> None:
+        self._update_checker.start()
+
+    def _on_update_found(self, version: str, url: str) -> None:
+        UpdateState.version = version
+        UpdateState.url = url
+        self._update_settings_icons()
+        self._show_status(tr("Update verfügbar, siehe Einstellungen"))
+
     def _fill_settings_menu(self) -> None:
         menu = self._settings_menu
         menu.clear()
@@ -6043,9 +6135,14 @@ class MainWindow(QMainWindow):
         self._fill_backup_menu(backup_menu, text_color)
         menu.addMenu(backup_menu)
 
+        # The version line offers a newer version with the dot of the settings icon, a click opens the download page
         menu.addSeparator()
-        version_action = menu.addAction(create_info_icon(text_color), tr("Version {version}", version=APP_VERSION))
-        version_action.setEnabled(False)
+        if UpdateState.version:
+            info_icon = add_badge(create_info_icon(text_color), self._theme.accent, self._theme.base)
+            menu.addAction(info_icon, tr("Version {version} (Update verfügbar)", version=APP_VERSION), lambda: open_link(UpdateState.url))
+        else:
+            version_action = menu.addAction(create_info_icon(text_color), tr("Version {version}", version=APP_VERSION))
+            version_action.setEnabled(False)
 
     def _set_language(self, language: str) -> None:
         if language == Language.current:
@@ -6090,8 +6187,7 @@ class MainWindow(QMainWindow):
             panel.apply_theme(self._theme)
         for button, icon_factory in self._icon_buttons:
             button.setIcon(icon_factory(self._theme.text))
-        self._settings_button.setIcon(create_settings_icon(self._theme.text, ICON_SIZE + FOLDER_ICON_GAP))
-        self._rail_settings_button.setIcon(create_settings_icon(self._theme.text))
+        self._update_settings_icons()
         self._project_list.viewport().update()
         self._item_list.viewport().update()
 

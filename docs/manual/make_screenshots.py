@@ -85,6 +85,7 @@ class Shooter:
         app_module.apply_color_mode("light")
         app_module.apply_zoom_factor(1.0)
         app_module.Language.current = app_module.LANGUAGE_ENGLISH
+        app_module.UpdateState.checked = True
         app_module.confirm = lambda *args, **kwargs: True
         app_module.show_message = lambda *args, **kwargs: None
 
@@ -422,6 +423,16 @@ def main() -> int:
     for name, path in (("settings_tabs", [tr("Reiter")]), ("settings_backups", [tr("Backups"), tr("Wiederherstellen")])):
         covered = shooter.settings_menu(name, path)
         crops[name] = QRect(0, covered.top() - 40, covered.right() + 40, window.height() - covered.top() + 40)
+
+    # A newer version in the settings, the version number is an example
+    numbers = app_module.version_numbers(app_module.APP_VERSION)
+    app_module.UpdateState.version = f"{numbers[0]}.{numbers[1] + 1}.0"
+    app_module.UpdateState.url = app_module.RELEASES_URL
+    window._update_settings_icons()
+    covered = shooter.settings_menu("settings_update", [])
+    crops["settings_update"] = QRect(0, covered.top() - 40, covered.right() + 40, window.height() - covered.top() + 40)
+    app_module.UpdateState.version = ""
+    window._update_settings_icons()
     (BUILD / "crops.json").write_text(json.dumps({name: [rect.x(), rect.y(), rect.width(), rect.height()] for name, rect in crops.items()}), encoding="utf-8")
 
     # Blue message bar
