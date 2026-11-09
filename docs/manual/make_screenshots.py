@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -135,12 +136,20 @@ class Shooter:
         self.review.attachments.append(self.storage.import_file(draft))
         self.review.created = now - 3 * 86400
         self.review.modified = now - 3600
+        self.review.condition = app_module.CONDITION_UNTIL
+        self.review.condition_date = (date.today() + timedelta(days=3)).isoformat()
+        about = app_module.Todo.create("Write the about us page", self.content.id)
+        about.condition = app_module.CONDITION_FROM
+        about.condition_text = "design approval"
+        quotes = app_module.Todo.create("Collect customer quotes", self.content.id)
+        quotes.condition = app_module.CONDITION_UNTIL
+        quotes.condition_date = (date.today() - timedelta(days=1)).isoformat()
         website.todos.extend([
             self.review,
             app_module.Todo.create("Choose image style", self.design.id),
             app_module.Todo.create("Check colors for accessibility", self.design.id),
-            app_module.Todo.create("Write the about us page", self.content.id),
-            app_module.Todo.create("Collect customer quotes", self.content.id),
+            about,
+            quotes,
         ])
         done = app_module.Todo.create("Hold kickoff meeting")
         done.done = True
@@ -291,6 +300,23 @@ def main() -> int:
     window.grab().save(str(README_SCREENSHOT))
     window.resize(*WINDOW_SIZE)
 
+    # Condition of a todo with the calendar
+    shooter.show(app_module.ITEM_TODO, shooter.review)
+    panel = window._todo_panel
+    calendar_covered: list[QRect] = []
+
+    def grab_calendar() -> None:
+        popup = QApplication.activePopupWidget()
+        button = panel._calendar_button
+        anchor = button.mapTo(window, QPoint(button.width(), button.height() + 4))
+        calendar_covered.append(shooter.compose([(popup, QPoint(anchor.x() - popup.width(), anchor.y()))], "condition"))
+        popup.close()
+
+    QTimer.singleShot(MENU_DELAY_MS, grab_calendar)
+    panel._show_calendar()
+    detail = shooter.window_rect(window._detail_stack)
+    condition_crop = QRect(detail.left(), detail.top() + 50, detail.width(), calendar_covered[0].bottom() - detail.top() - 30)
+
     # Main window with the positions of the callouts
     shooter.show(app_module.ITEM_TODO, shooter.review)
     shooter.save("overview")
@@ -309,7 +335,7 @@ def main() -> int:
     (BUILD / "callouts.json").write_text(json.dumps(positions), encoding="utf-8")
 
     # Areas of the screenshots shown as a detail in the manual, in window coordinates
-    crops: dict[str, QRect] = {"todo_details": shooter.window_rect(window._detail_stack)}
+    crops: dict[str, QRect] = {"todo_details": shooter.window_rect(window._detail_stack), "condition": condition_crop}
 
     # Project menu with the colors
     project_rect = window._project_list.visualItemRect(window._project_list.find_row(shooter.website.id))

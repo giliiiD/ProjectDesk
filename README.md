@@ -24,5 +24,5 @@ For a local build: Python 3 and Inno Setup are required. Run `build.bat`, the in
 
 ---
 
-Version 2.1.0  
+Version 2.2.0  
 Daniel Gilinberg

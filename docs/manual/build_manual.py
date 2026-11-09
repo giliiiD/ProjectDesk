@@ -197,6 +197,10 @@ def write_chapters(manual: Manual) -> None:
 <li>{ui("Flag")}: right-click an open todo and choose {ui("Flag")} for important todos. They get a yellow background and the project shows a red flag. A click on the flag removes it.</li>
 <li>{ui("Rename")}: double-click the todo in the list, or edit the title on the right.</li>
 </ul>
+<h3>Condition</h3>
+<p>A todo can have a condition: {ui("Until")} for a deadline or {ui("From")} for the earliest start. Choose the kind next to {ui("Condition")}, then type a date like 14.11. or 2026-11-14, or any text like "design approval". The calendar icon picks a date. {ui("None")} removes the condition.</p>
+{manual.figure("condition.png", "A deadline picked in the calendar", size=62)}
+<p>The condition is shown below the title of the todo. A deadline that is today or past is red, a start date that is reached is blue.</p>
 <h3>Description</h3>
 <p>Descriptions, notes and the notes of links share the same toolbar:</p>
 {manual.figure("toolbar.png", "The toolbar for formatting text", size=45)}

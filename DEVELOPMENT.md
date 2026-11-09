@@ -47,6 +47,7 @@ ProjectDesk is a Windows application for project based work, visually based on M
 - Projects on the left, each with a color dot, plus the fixed project "General" and an archive
 - Every project has three tabs: todos, notes and links, each with optional groups. Tabs can be hidden in the settings
 - List in the middle, sortable by drag and drop, details of the selected entry on the right, the right column can be maximized
+- Todos with a condition: until or from, as a date or as a text
 - Formatted text with font sizes, highlight, bullet and numbered lists in all text fields
 - Notes with inline images, export as PDF, lines can be turned into todos
 - Entries, groups and whole projects can be exported as `.pdesk` files and imported by colleagues
@@ -183,7 +184,10 @@ Structure of `data.json` (version 2):
           "created": 1762250000.0,
           "modified": 1762250000.0,
           "group_id": "…",
-          "attachments": [{"id": "…", "name": "Image.png", "file": "…_Image.png", "added": 1762250000.0}]
+          "attachments": [{"id": "…", "name": "Image.png", "file": "…_Image.png", "added": 1762250000.0}],
+          "condition": "until",
+          "condition_date": "2026-11-14",
+          "condition_text": ""
         }
       ],
       "notes": [{"id": "…", "title": "…", "text": "…", "html": "…", "created": 0.0, "modified": 0.0, "group_id": null}],
@@ -206,6 +210,7 @@ Data model rules:
 - Deleting a group keeps its entries, they are shown without group
 - Done todos are shown in the section "Done" at the end of the todo tab, they keep their group for when they are opened again
 - Done todos are never flagged. Checking a todo removes its flag, it stays removed when the todo is opened again. `Todo.from_dict` drops the flag of done todos
+- `condition` is empty, `until` or `from`. `condition_date` is an ISO date or empty, `condition_text` is used when there is no date. `Todo.from_dict` drops unknown kinds and invalid dates
 - Projects without color get the next free color of `PROJECT_COLORS` in `AppData.normalize`, the general project starts gray
 - `modified` is set through `touch` whenever the content of an entry changes in the right column. The footer shows "Created" and, if changed later, "Modified"
 - Saving happens automatically 300 ms after every change, through a temporary file and `os.replace`
@@ -220,6 +225,17 @@ Files of deleted entries:
 - `Storage.restore_files` moves files back from `backups\files\` after undo, redo or restoring a backup
 
 Personal settings are stored in the registry under `HKEY_CURRENT_USER\Software\ToDo\ToDo` (QSettings, the old name is kept so existing settings stay): `dataFolder`, `geometry`, `splitter`, `archiveExpanded`, `colorMode`, `zoom`, `language`, `activeTab`, `enabledTabs`, `sidebarCollapsed`, `sidebarWidth`, `pdfFolder`, `autoBackup`, `exchangeFolder`. Without `sidebarCollapsed` the project column starts collapsed when only the general project exists. `enabledTabs` holds the visible tabs separated by spaces, for example `todo note`. Without it all tabs are visible.
+
+## Todo Conditions
+
+- A todo can have a condition: "Until" (`CONDITION_UNTIL`) for a deadline, "From" (`CONDITION_FROM`) for the earliest start
+- Right column of a todo (`TodoPanel`): the row "Condition" with a button for the kind (None, Until, From), a field for a date or a text and a calendar icon. With the kind None the field and the calendar are hidden, choosing None clears date and text
+- The field takes a date or any text (`parse_condition_date`): `14.11.2026`, `14.11.26`, `14.11.`, `14.11` and `2026-11-14` are dates, everything else is stored as text. A date without year more than half a year ago (`CONDITION_NEXT_YEAR_DAYS`) means next year. When the field loses the focus, a date is shown in the date format of the language
+- The calendar (`TodoPanel._show_calendar`) opens below its icon in the colors of the app, a click takes the day
+- In the list the condition is the second line of the card (`todo_condition`): "Until 14.11.2026", "From design approval". Today, tomorrow and yesterday are written as words
+- Colors (`STATE_ROLE`): red when an "Until" date is today or past, blue when a "From" date is reached, otherwise gray. Done todos and text conditions are always gray. The color is the only mark, there is no extra word
+- `MainWindow._check_day` checks every minute (`DAY_CHECK_MS`) whether the date changed and updates the cards, also after the computer slept
+- Choosing the kind and choosing a day in the calendar are undo steps of their own (`ItemPanel.step_started`), typing in the field is one step per entry
 
 ## Tabs Setting
 
@@ -290,7 +306,8 @@ Import:
 - Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes, without a message
 - Snapshot based: `MainWindow._checkpoint()` stores the whole data (`AppData.to_dict`) and the view (tab, selected entries) before a change. Every new change must call `_checkpoint` first
 - 50 steps (`UNDO_LIMIT`). A new change clears the redo steps
-- While a text field has the focus, Ctrl+Z and Ctrl+Y belong to the text field. Typing in the right column is one step per entry and field session (`ItemPanel.edit_started`, `_editing_key`)
+- While a text field has the focus, Ctrl+Z and Ctrl+Y belong to the text field. Typing in the right column is one step per entry and field session (`ItemPanel.edit_started`, `_editing_key`). Showing another entry ends the session
+- Choices in the right column, like the kind of a condition or a day in the calendar, are steps of their own (`ItemPanel.step_started`, `MainWindow._on_step_started`)
 - Creating and naming a new project, group or entry is one step. Moving or deleting several selected entries is one step
 - If the restored view points to a hidden tab, the first visible tab is shown
 - Opening another storage location clears the steps
@@ -344,11 +361,11 @@ Order inside `project_desk.py`:
 | `TitleEdit`, `ElidedLabel`, `DropZone`, `StatusBanner`, `RichTextEdit`, `DescriptionEditor` | Text editing with formats, sizes, highlight and lists, links, inline images, editor right click menu, formatting toolbar, attachment drop zone, blue message bar |
 | `ScaledImage`, `ImageViewer`, `AttachmentCard` | Attachments with preview for images and PDF files |
 | Icon functions | `create_..._icon`, all drawn as line icons through `create_line_icon` |
-| Formatting | `backup_label`, `format_date`, `format_timestamp`, `count_text`, `entries_text`, `format_size` |
+| Formatting | `backup_label`, `format_date`, `iso_date`, `parse_condition_date`, `format_condition_date`, `todo_condition`, `format_timestamp`, `count_text`, `entries_text`, `format_size` |
 | Export package | `PackageError`, `package_files`, `write_package`, `ImportPackage` |
 | `write_note_pdf` | PDF export of a note |
 | `ItemPanel` | Base of the right column: title, maximize icon, content, footer with dates |
-| `TodoPanel`, `NotePanel`, `LinkPanel` | Right column per tab |
+| `TodoPanel`, `NotePanel`, `LinkPanel` | Right column per tab, `TodoPanel` with condition, description and attachments |
 | `TabBar` | Tabs of the middle column |
 | `InputFilter` | Ctrl+V for attachments and note images, Ctrl + mouse wheel for zoom |
 | `MainWindow` | Layout, rendering, menus, all actions, export, import, undo, backups, settings, saving |
@@ -475,6 +492,7 @@ Not testable in offscreen mode, check these on Windows after related changes:
 - title bar and rounded corners of dialogs
 - the animation of the message bar and scrolling with the mouse wheel
 - the update of an existing ToDo installation
+- the calendar of conditions and the change of the day while ProjectDesk stays open
 
 ## Workflow for Change Requests
 
@@ -498,6 +516,13 @@ This way of working has proven itself:
 - The installer is not signed
 
 ## Version History
+
+### 2.2.0
+- Todos can have a condition: "Until" for a deadline or "From" for the earliest start, as a date or as a text
+- Dates can be typed like 14.11. or picked in a calendar
+- The condition is shown below the todo title, red when a deadline is today or past, blue when a start date is reached
+- The cards follow the date while ProjectDesk stays open
+- Showing another entry starts a new undo step for typing in the right column
 
 ### 2.1.0
 - Text formatting with strikethrough, four font sizes, highlight and numbered lists, in addition to bold, italic, underline and bullet lists

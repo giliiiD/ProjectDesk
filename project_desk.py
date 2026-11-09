@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QByteArray, QEasingCurve, QEvent, QItemSelectionModel, QMarginsF, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSettings, QSize, QSizeF, QStandardPaths, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QDate, QEasingCurve, QEvent, QItemSelectionModel, QLocale, QMarginsF, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSettings, QSize, QSizeF, QStandardPaths, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -60,6 +60,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCalendarWidget,
     QDialog,
     QFileDialog,
     QFrame,
@@ -87,6 +88,7 @@ from PySide6.QtWidgets import (
     QToolTip,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -101,7 +103,7 @@ except ImportError:
 
 # Constants
 APP_NAME = "ProjectDesk"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 APP_USER_MODEL_ID = "ProjectDesk.App"
 SETTINGS_ORGANIZATION = "ToDo"
 SETTINGS_APPLICATION = "ToDo"
@@ -186,6 +188,7 @@ TARGET_ROLE = Qt.ItemDataRole.UserRole + 11
 TOOLTIP_ROLE = Qt.ItemDataRole.UserRole + 12
 DONE_ROLE = Qt.ItemDataRole.UserRole + 14
 COLOR_ROLE = Qt.ItemDataRole.UserRole + 15
+STATE_ROLE = Qt.ItemDataRole.UserRole + 16
 
 KIND_PROJECT = "project"
 KIND_ARCHIVE_HEADER = "archive_header"
@@ -217,6 +220,14 @@ SUBMENU_GAP = 2
 BULLET_INDENT = 18
 BULLET_MARKERS = ("-", "*")
 LIST_MAX_INDENT = 4
+CONDITION_UNTIL = "until"
+CONDITION_FROM = "from"
+CONDITION_KINDS = (("", "Keine"), (CONDITION_UNTIL, "Bis"), (CONDITION_FROM, "Ab"))
+CONDITION_OVERDUE = "overdue"
+CONDITION_DUE = "due"
+CONDITION_STARTED = "started"
+CONDITION_NEXT_YEAR_DAYS = 183
+DAY_CHECK_MS = 60000
 TOOLBAR_SEPARATOR_HEIGHT = 16
 TABULAR_FIGURES_FEATURE = "tnum"
 FONT_SIZE_STEPS = (("Klein", -1, 0.8), ("Normal", 0, 1.0), ("Groß", 1, 1.2), ("Sehr groß", 2, 1.5))
@@ -409,6 +420,16 @@ class Language:
 TRANSLATIONS = {
     "%d.%m.%Y": "%Y-%m-%d",
     "%d.%m.%Y, %H:%M": "%Y-%m-%d %H:%M",
+    "Ab": "From",
+    "Art der Bedingung": "Kind of condition",
+    "Bedingung": "Condition",
+    "Bis": "Until",
+    "Datum auswählen": "Choose date",
+    "Datum oder Text": "Date or text",
+    "Keine": "None",
+    "gestern": "yesterday",
+    "heute": "today",
+    "morgen": "tomorrow",
     "1 Eintrag gibt es schon.": "1 entry already exists.",
     "1 Link": "1 link",
     "1 Notiz": "1 note",
@@ -939,6 +960,11 @@ QLineEdit#titleEdit {{ background: transparent; border: none; padding: 0px; }}
 QLineEdit#newItemEdit {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; padding: 7px 10px; }}
 QLineEdit#newItemEdit:focus, QLineEdit#fieldEdit:focus {{ border-color: {self.accent.name()}; }}
 QLineEdit#fieldEdit {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; padding: 5px 8px; }}
+QToolButton#conditionButton {{ background: {self.base.name()}; border: 1px solid {self.divider.name()}; border-radius: 6px; padding: 5px 6px 5px 8px; }}
+QToolButton#conditionButton:hover {{ background: {self.hover.name()}; }}
+QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {self.base.name()}; }}
+QCalendarWidget QToolButton {{ color: {self.text.name()}; font-weight: 600; }}
+QCalendarWidget QAbstractItemView {{ background: {self.base.name()}; selection-background-color: {self.accent.name()}; selection-color: #ffffff; outline: none; }}
 QLineEdit#inlineEdit {{ background: {self.base.name()}; color: {self.text.name()}; border: 1px solid {self.accent.name()}; border-radius: 4px; padding: 1px 4px; }}
 QFrame#tabRow {{ background: transparent; border: none; border-bottom: 1px solid {self.divider.name()}; }}
 QToolButton#tabButton {{ background: transparent; color: {self.muted.name()}; border: none; border-bottom: 2px solid transparent; border-radius: 0px; padding: 0px; }}
@@ -1073,6 +1099,9 @@ class Todo:
     modified: float = 0.0
     group_id: Optional[str] = None
     attachments: list[Attachment] = field(default_factory=list)
+    condition: str = ""
+    condition_date: str = ""
+    condition_text: str = ""
 
     @staticmethod
     def create(title: str, group_id: Optional[str] = None) -> Todo:
@@ -1082,6 +1111,8 @@ class Todo:
     @staticmethod
     def from_dict(values: dict) -> Todo:
         done_at = values.get("done_at")
+        condition = str(values.get("condition", ""))
+        condition_date = str(values.get("condition_date", "") or "")
         return Todo(
             id=str(values["id"]),
             title=str(values.get("title", "")),
@@ -1094,6 +1125,9 @@ class Todo:
             modified=float(values.get("modified", 0.0)),
             group_id=optional_id(values.get("group_id")),
             attachments=[Attachment.from_dict(entry) for entry in values.get("attachments", [])],
+            condition=condition if condition in (CONDITION_UNTIL, CONDITION_FROM) else "",
+            condition_date=condition_date if iso_date(condition_date) is not None else "",
+            condition_text=str(values.get("condition_text", "")),
         )
 
 
@@ -2076,9 +2110,16 @@ class ItemDelegate(QStyledItemDelegate):
 
         subtitle = index.data(SUBTITLE_ROLE) or ""
         if subtitle:
+            # Conditions of todos: red when overdue or due today, blue when the start is reached
+            state = index.data(STATE_ROLE) or ""
             metrics = QFontMetrics(option.font)
             painter.setFont(option.font)
-            painter.setPen(self.theme.muted)
+            if state in (CONDITION_OVERDUE, CONDITION_DUE):
+                painter.setPen(self.theme.flag)
+            elif state == CONDITION_STARTED:
+                painter.setPen(self.theme.accent)
+            else:
+                painter.setPen(self.theme.muted)
             elided = metrics.elidedText(subtitle, Qt.TextElideMode.ElideRight, round(geometry.subtitle_rect.width()))
             painter.drawText(geometry.subtitle_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
 
@@ -4450,6 +4491,38 @@ def create_dot_icon(color: QColor) -> QIcon:
     return QIcon(pixmap)
 
 
+def create_calendar_icon(color: QColor) -> QIcon:
+    # Calendar sheet with two rings
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(2.5, 3.5, 11.0, 10.0), 1.5, 1.5)
+    path.moveTo(2.5, 6.75)
+    path.lineTo(13.5, 6.75)
+    path.moveTo(5.5, 2.0)
+    path.lineTo(5.5, 4.75)
+    path.moveTo(10.5, 2.0)
+    path.lineTo(10.5, 4.75)
+    return create_line_icon(color, path)
+
+
+def create_chevron_down_icon(color: QColor) -> QIcon:
+    path = QPainterPath()
+    path.moveTo(4.5, 6.5)
+    path.lineTo(8.0, 10.0)
+    path.lineTo(11.5, 6.5)
+    return create_line_icon(color, path)
+
+
+def create_chevron_side_icon(color: QColor, forward: bool) -> QIcon:
+    # Chevron to the right or to the left
+    path = QPainterPath()
+    tip = 10.0 if forward else 6.0
+    back = 6.5 if forward else 9.5
+    path.moveTo(back, 4.5)
+    path.lineTo(tip, 8.0)
+    path.lineTo(back, 11.5)
+    return create_line_icon(color, path)
+
+
 def create_text_size_icon(color: QColor) -> QIcon:
     # Large and small letter T
     path = QPainterPath()
@@ -4586,6 +4659,78 @@ def backup_label(moment: datetime, reason: str) -> str:
 
 def format_date(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).strftime(tr("%d.%m.%Y"))
+
+
+def iso_date(text: str) -> Optional[date]:
+    try:
+        return date.fromisoformat(text) if text else None
+    except ValueError:
+        return None
+
+
+def parse_condition_date(text: str, today: Optional[date] = None) -> Optional[date]:
+    # Accepts 14.11.2026, 14.11.26, 14.11. and 2026-11-14, a day without year more than half a year ago means next year
+    today = today or date.today()
+    value = text.strip()
+    iso_match = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", value)
+    year_given = True
+    if iso_match is not None:
+        year, month, day = int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
+    else:
+        match = re.fullmatch(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2}|\d{4})?)?", value)
+        if match is None:
+            return None
+        day, month = int(match.group(1)), int(match.group(2))
+        year_text = match.group(3)
+        if year_text is None:
+            year = today.year
+            year_given = False
+        else:
+            year = int(year_text) + (2000 if len(year_text) == 2 else 0)
+    try:
+        result = date(year, month, day)
+    except ValueError:
+        return None
+    if year_given is False and (today - result).days > CONDITION_NEXT_YEAR_DAYS:
+        try:
+            result = date(year + 1, month, day)
+        except ValueError:
+            return None
+    return result
+
+
+def format_condition_date(day: date, today: Optional[date] = None) -> str:
+    today = today or date.today()
+    if day == today:
+        return tr("heute")
+    if day == today + timedelta(days=1):
+        return tr("morgen")
+    if day == today - timedelta(days=1):
+        return tr("gestern")
+    return day.strftime(tr("%d.%m.%Y"))
+
+
+def todo_condition(todo: Todo, today: Optional[date] = None) -> tuple[str, str]:
+    # Text under the todo title and its state: overdue, due today, started or nothing
+    if not todo.condition:
+        return "", ""
+    today = today or date.today()
+    prefix = tr(dict(CONDITION_KINDS)[todo.condition])
+    day = iso_date(todo.condition_date)
+    if day is None:
+        value = todo.condition_text.strip()
+        return (prefix + " " + value, "") if value else ("", "")
+
+    text = prefix + " " + format_condition_date(day, today)
+    if todo.done:
+        return text, ""
+    if todo.condition == CONDITION_UNTIL and day < today:
+        return text, CONDITION_OVERDUE
+    if todo.condition == CONDITION_UNTIL and day == today:
+        return text, CONDITION_DUE
+    if todo.condition == CONDITION_FROM and day <= today:
+        return text, CONDITION_STARTED
+    return text, ""
 
 
 def format_timestamp(timestamp: float) -> str:
@@ -4805,6 +4950,7 @@ class ItemPanel(QWidget):
 
     content_changed = Signal()
     edit_started = Signal()
+    step_started = Signal()
     maximize_toggled = Signal()
 
     def __init__(self, placeholder_text: str, title_placeholder: str, parent: Optional[QWidget] = None) -> None:
@@ -4960,6 +5106,41 @@ class TodoPanel(ItemPanel):
         self._description.changed.connect(self._on_description_changed)
         self._title_edit.submitted.connect(lambda: self._description.text_edit().setFocus())
 
+        # Condition: kind, then a date or a text, the calendar picks a date
+        self._condition_button = QToolButton()
+        self._condition_button.setObjectName("conditionButton")
+        self._condition_button.setToolTip(tr("Art der Bedingung"))
+        self._condition_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._condition_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._condition_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._condition_button.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        condition_menu = create_menu(self._condition_button)
+        condition_menu.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        condition_group = QActionGroup(condition_menu)
+        condition_group.setExclusive(True)
+        for kind, label in CONDITION_KINDS:
+            action = condition_menu.addAction(tr(label), lambda checked=False, selected=kind: self._set_condition_kind(selected))
+            action.setCheckable(True)
+            action.setData(kind)
+            condition_group.addAction(action)
+        condition_menu.aboutToShow.connect(self._update_condition_menu)
+        self._condition_button.setMenu(condition_menu)
+        self._condition_menu = condition_menu
+
+        self._condition_edit = create_field_edit(tr("Datum oder Text"))
+        self._condition_edit.textEdited.connect(self._on_condition_edited)
+        self._condition_edit.editingFinished.connect(self._show_condition)
+        self._calendar_button = create_icon_button(tr("Datum auswählen"), self._show_calendar)
+
+        condition_row = QWidget()
+        condition_layout = QHBoxLayout(condition_row)
+        condition_layout.setContentsMargins(0, 0, 0, 0)
+        condition_layout.setSpacing(6)
+        condition_layout.addWidget(self._condition_button)
+        condition_layout.addWidget(self._condition_edit, 1)
+        condition_layout.addWidget(self._calendar_button)
+        condition_layout.addStretch()
+
         self._drop_zone = DropZone(tr("Dateien hierher ziehen, klicken oder Strg+V"))
         self._drop_zone.clicked.connect(self._choose_files)
 
@@ -4978,6 +5159,8 @@ class TodoPanel(ItemPanel):
         self._attachment_scroll.setWidget(attachment_container)
         self._attachment_scroll.viewport().setAutoFillBackground(False)
 
+        self.body_layout.addLayout(create_field_grid([(tr("Bedingung"), condition_row)]))
+        self.body_layout.addSpacing(10)
         self.body_layout.addWidget(self._description)
         self.body_layout.addSpacing(10)
         self.body_layout.addWidget(create_section_label(tr("Anhänge")))
@@ -4988,6 +5171,8 @@ class TodoPanel(ItemPanel):
         super().apply_theme(theme)
         self._description.apply_theme(theme)
         self._drop_zone.apply_theme(theme)
+        self._condition_button.setIcon(create_chevron_down_icon(theme.muted))
+        self._calendar_button.setIcon(create_calendar_icon(theme.text))
         if self._item is not None:
             self._rebuild_attachments()
 
@@ -4995,12 +5180,112 @@ class TodoPanel(ItemPanel):
         super().apply_zoom()
         self._description.apply_zoom()
         self._drop_zone.apply_theme(self._theme)
+        self._condition_button.setIconSize(QSize(ipx(ICON_SIZE), ipx(ICON_SIZE)))
+        self._calendar_button.setFixedSize(ipx(30), ipx(30))
+        self._calendar_button.setIconSize(QSize(ipx(ICON_SIZE), ipx(ICON_SIZE)))
         if self._item is not None:
             self._rebuild_attachments()
 
     def load(self, todo: Todo) -> None:
+        self._show_condition()
         self._description.set_content(todo.description_html, todo.description)
         self._rebuild_attachments()
+
+    def _show_condition(self) -> None:
+        # Kind on the button, a date in the date format of the language, the field only with a kind
+        todo = self._item
+        if todo is None:
+            return
+        kind = todo.condition
+        self._condition_button.setText(tr(dict(CONDITION_KINDS)[kind]))
+        self._condition_edit.setVisible(bool(kind))
+        self._calendar_button.setVisible(bool(kind))
+        day = iso_date(todo.condition_date)
+        text = day.strftime(tr("%d.%m.%Y")) if day is not None else todo.condition_text
+        if self._condition_edit.text() != text:
+            self._condition_edit.setText(text)
+            self._condition_edit.setCursorPosition(0)
+
+    def _update_condition_menu(self) -> None:
+        kind = self._item.condition if self._item is not None else ""
+        for action in self._condition_menu.actions():
+            action.setChecked(action.data() == kind)
+
+    def _set_condition_kind(self, kind: str) -> None:
+        if self._item is None or kind == self._item.condition:
+            return
+        self.step_started.emit()
+        self._item.condition = kind
+        if not kind:
+            self._item.condition_date = ""
+            self._item.condition_text = ""
+        self._show_condition()
+        self.item_changed()
+        if kind and not self._condition_edit.text():
+            self._condition_edit.setFocus()
+
+    def _on_condition_edited(self, text: str) -> None:
+        if self._item is None:
+            return
+        self.edit_started.emit()
+        day = parse_condition_date(text)
+        self._item.condition_date = day.isoformat() if day is not None else ""
+        self._item.condition_text = "" if day is not None else text.strip()
+        self.item_changed()
+
+    def _set_condition_date(self, day: date) -> None:
+        if self._item is None:
+            return
+        self.step_started.emit()
+        self._item.condition_date = day.isoformat()
+        self._item.condition_text = ""
+        self._show_condition()
+        self.item_changed()
+
+    def _show_calendar(self) -> None:
+        # Month calendar below the button, a click takes the day
+        if self._item is None:
+            return
+        menu = create_menu(self)
+        calendar = QCalendarWidget()
+        calendar.setGridVisible(False)
+        calendar.setLocale(QLocale(QLocale.Language.German if Language.current == LANGUAGE_GERMAN else QLocale.Language.English))
+        calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
+        calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        calendar.setHorizontalHeaderFormat(QCalendarWidget.HorizontalHeaderFormat.ShortDayNames)
+
+        # Colors of the app: weekends like other days, muted day names, today bold in the accent color
+        calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, QTextCharFormat())
+        calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, QTextCharFormat())
+        header_format = QTextCharFormat()
+        header_format.setForeground(self._theme.muted)
+        header_format.setBackground(self._theme.base)
+        calendar.setHeaderTextFormat(header_format)
+        today_format = QTextCharFormat()
+        today_format.setForeground(self._theme.accent)
+        today_format.setFontWeight(QFont.Weight.Bold)
+        calendar.setDateTextFormat(QDate.currentDate(), today_format)
+        for name, forward in (("qt_calendar_prevmonth", False), ("qt_calendar_nextmonth", True)):
+            button = calendar.findChild(QToolButton, name)
+            if button is not None:
+                button.setIcon(create_chevron_side_icon(self._theme.text, forward))
+                button.setIconSize(QSize(ipx(ICON_SIZE), ipx(ICON_SIZE)))
+
+        current = iso_date(self._item.condition_date) or date.today()
+        calendar.setSelectedDate(QDate(current.year, current.month, current.day))
+
+        def take(selected: QDate) -> None:
+            menu.close()
+            self._set_condition_date(date(selected.year(), selected.month(), selected.day()))
+
+        calendar.clicked.connect(take)
+        calendar.activated.connect(take)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(calendar)
+        menu.addAction(action)
+        anchor = self._calendar_button.mapToGlobal(QPoint(self._calendar_button.width(), self._calendar_button.height()))
+        menu.exec(QPoint(anchor.x() - menu.sizeHint().width(), anchor.y() + ipx(4)))
+        menu.deleteLater()
 
     def clear(self) -> None:
         self._clear_attachments()
@@ -5393,6 +5678,12 @@ class MainWindow(QMainWindow):
         self._save_timer.setInterval(SAVE_DELAY_MS)
         self._save_timer.timeout.connect(self._save_now)
 
+        self._today = date.today()
+        self._day_timer = QTimer(self)
+        self._day_timer.setInterval(DAY_CHECK_MS)
+        self._day_timer.timeout.connect(self._check_day)
+        self._day_timer.start()
+
         self.setWindowTitle(APP_NAME)
         self.setAcceptDrops(True)
         self.resize(1300, 800)
@@ -5589,6 +5880,7 @@ class MainWindow(QMainWindow):
             panel = self._panels[item_type]
             panel.content_changed.connect(self._on_detail_changed)
             panel.edit_started.connect(self._on_edit_started)
+            panel.step_started.connect(self._on_step_started)
             panel.maximize_toggled.connect(lambda: self._set_detail_maximized(self._detail_maximized is False))
             self._header_frames.append(panel.header_frame)
             self._footers.append(panel.footer)
@@ -6011,6 +6303,8 @@ class MainWindow(QMainWindow):
             row.setData(DONE_ROLE, item.done)
             row.setData(COUNT_ROLE, len(item.attachments))
             row.setData(FLAGGED_ROLE, item.flagged)
+            subtitle, state = todo_condition(item)
+            row.setData(STATE_ROLE, state)
             flags |= Qt.ItemFlag.ItemIsUserCheckable
             if item.done is False:
                 flags |= Qt.ItemFlag.ItemIsDragEnabled
@@ -6373,6 +6667,7 @@ class MainWindow(QMainWindow):
         return item
 
     def _on_item_selection_changed(self) -> None:
+        previous = self._selected.get(self._tab)
         ids = self._item_list.selected_ids()
         current = self._item_list.currentItem()
         current_id = current.data(ID_ROLE) if current is not None and current.data(KIND_ROLE) == KIND_ITEM else None
@@ -6385,6 +6680,8 @@ class MainWindow(QMainWindow):
             self._selected[self._tab] = current_id
         elif self._selected[self._tab] not in ids:
             self._selected[self._tab] = ids[-1]
+        if self._selected[self._tab] != previous:
+            self._editing_key = None
         self._render_detail()
 
     def _on_item_row_changed(self, row: QListWidgetItem) -> None:
@@ -6620,6 +6917,21 @@ class MainWindow(QMainWindow):
             return
         self._checkpoint()
         self._editing_key = key
+
+    def _check_day(self) -> None:
+        # On a new day the conditions of the todos show the new state, also after sleep
+        if date.today() == self._today:
+            return
+        self._today = date.today()
+        if self._tab != ITEM_TODO:
+            return
+        for todo in self._project().todos:
+            self._update_item_row(ITEM_TODO, todo)
+
+    def _on_step_started(self) -> None:
+        # A choice in the right column is an undo step of its own, typing afterwards starts the next one
+        self._checkpoint()
+        self._editing_key = None
 
     def _create_todos_from_note(self, texts: list[str]) -> None:
         project = self._project()
